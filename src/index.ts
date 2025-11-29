@@ -1,0 +1,81 @@
+/**
+ * Dibbla Agents SDK for TypeScript
+ * 
+ * A TypeScript SDK for building workflow functions with gRPC communication.
+ * 
+ * @example
+ * ```typescript
+ * import * as sdk from '@dibbla-agents/sdk-ts';
+ * import { z } from 'zod';
+ * 
+ * const GreetingInput = z.object({ name: z.string() });
+ * const GreetingOutput = z.object({ message: z.string() });
+ * 
+ * const server = sdk.create({
+ *   serverName: 'my-worker',
+ *   serverApiToken: process.env.SERVER_API_TOKEN,
+ * });
+ * 
+ * const greetingFn = sdk.newSimpleFunction({
+ *   name: 'greeting',
+ *   version: '1.0.0',
+ *   description: 'Generate a greeting message',
+ *   input: GreetingInput,
+ *   output: GreetingOutput,
+ *   handler: (input) => ({ message: `Hello, ${input.name}!` }),
+ *   tags: ['utility', 'greeting'],
+ * });
+ * 
+ * server.registerFunction(greetingFn);
+ * server.start();
+ * ```
+ */
+
+// Main SDK exports
+export { Server, create } from './sdk';
+export { ServerConfig, ServerOptions } from './config';
+
+// Function builder exports
+export {
+  newFunction,
+  newSimpleFunction,
+  WorkerFunction,
+  FunctionOptions,
+  SimpleFunctionOptions,
+  FunctionHandler,
+  SimpleFunctionHandler,
+  GlobalState,
+  FunctionCache,
+  // Service client interfaces
+  CacheClient,
+  StoreClient,
+  OAuthClient,
+  RpcClient,
+  OAuthProvider,
+  OAuthTokenResponse,
+  OAuthProviderStatus,
+  ExecutionNode,
+  // Re-export Zod for convenience
+  z,
+} from './function';
+
+// Type exports
+export {
+  Events,
+  EventType,
+  EventMessage,
+  FunctionDefinition,
+  createEmptyEventMessage,
+} from './types/events';
+
+export { functionKey, FUNCTION_PREFIX } from './types/keys';
+
+// OAuth provider constants
+export { OAuthProviders } from './internal/oauth/oauth-client';
+
+// Utility exports (for advanced use cases)
+export { shouldUseTLS } from './internal/grpc/communicator';
+export { uid } from './internal/utils/uid';
+export { generateHash } from './internal/utils/hash';
+export { zodToFlattenedSchema, zodToSchemaString } from './internal/utils/schema';
+

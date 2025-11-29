@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package workflows;
+
+import "google/protobuf/struct.proto";
+
+message GrpcEventMessage {
+  string function = 1;
+  string node = 2;
+  string workflow = 3;
+  string version = 4;
+  string server = 5;
+  string event = 6;
+  string text = 7;
+  string run = 8;
+  google.protobuf.Struct meta = 9;
+  bytes payload = 10;
+  string correlation_id = 11;
+}
+
+service EventService {
+  rpc Events(stream GrpcEventMessage) returns (stream GrpcEventMessage);
+}
+

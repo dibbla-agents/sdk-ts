@@ -1,0 +1,364 @@
+/**
+ * Example: Google Sheets Worker using the Dibbla SDK for TypeScript
+ * 
+ * This example demonstrates how to read from and write to Google Sheets
+ * using OAuth access tokens.
+ * 
+ * Prerequisites:
+ * - User must have connected their Google account in the workflow
+ * 
+ * To run:
+ * 1. Set environment variables (or use .env file):
+ *    - SERVER_API_TOKEN=your-api-token
+ *    - SERVER_NAME=my-sheets-worker (optional)
+ * 
+ * 2. Run: npx ts-node examples/google-sheets-worker.ts
+ */
+
+import * as sdk from '../src/index';
+import { z } from 'zod';
+
+// ============================================================================
+// READ GOOGLE SHEETS
+// ============================================================================
+
+const ReadGoogleSheetsInput = z.object({
+  url: z.string().describe('The full Google Sheets URL (e.g., "https://docs.google.com/spreadsheets/d/1abc.../edit")'),
+});
+
+const SheetContent = z.object({
+  sheetName: z.string().describe('Name of the sheet tab'),
+  cells: z.string().describe('JSON object mapping cell references to values (e.g., {"A1": "Name", "B1": "Age"})'),
+  rowCount: z.number().describe('Number of rows with data'),
+  colCount: z.number().describe('Number of columns with data'),
+});
+
+const ReadGoogleSheetsOutput = z.object({
+  sheetContents: z.array(SheetContent).describe('Array of sheets with their contents'),
+  spreadsheetId: z.string().describe('The unique spreadsheet identifier'),
+  title: z.string().describe('The spreadsheet title'),
+});
+
+// ============================================================================
+// UPDATE GOOGLE SHEETS
+// ============================================================================
+
+const UpdateGoogleSheetsInput = z.object({
+  url: z.string().describe('The full Google Sheets URL'),
+  sheetName: z.string().describe('Name of the sheet tab to update (e.g., "Sheet1")'),
+  range: z.string().describe('The cell range in A1 notation (e.g., "A1", "A1:C3", "A:A")'),
+  values: z.string().describe('A JSON 2D array matching the range dimensions (e.g., [["a", "b"], ["c", "d"]])'),
+});
+
+const UpdateGoogleSheetsOutput = z.object({
+  updatedRange: z.string().describe('The actual range that was updated'),
+  updatedRows: z.number().describe('Number of rows updated'),
+  updatedColumns: z.number().describe('Number of columns updated'),
+  updatedCells: z.number().describe('Total number of cells updated'),
+  spreadsheetId: z.string().describe('The spreadsheet identifier'),
+});
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Parse spreadsheet ID from a Google Sheets URL
+ */
+function parseSpreadsheetId(sheetsUrl: string): string {
+  const url = new URL(sheetsUrl);
+  
+  if (!url.host.includes('docs.google.com')) {
+    throw new Error(`Not a Google Sheets URL: host is ${url.host}`);
+  }
+  
+  const match = url.pathname.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (!match || !match[1]) {
+    throw new Error(`Could not find spreadsheet ID in URL path: ${url.pathname}`);
+  }
+  
+  return match[1];
+}
+
+/**
+ * Convert column index to A1 notation letter(s)
+ * Examples: 0 -> "A", 1 -> "B", 25 -> "Z", 26 -> "AA"
+ */
+function colIndexToLetter(col: number): string {
+  let result = '';
+  while (col >= 0) {
+    result = String.fromCharCode('A'.charCodeAt(0) + (col % 26)) + result;
+    col = Math.floor(col / 26) - 1;
+  }
+  return result;
+}
+
+/**
+ * Fetch spreadsheet metadata (title and sheet names)
+ */
+async function getSpreadsheetMetadata(accessToken: string, spreadsheetId: string) {
+  const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`;
+  
+  const response = await fetch(apiUrl, {
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+    },
+  });
+  
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`API request failed with status ${response.status}: ${body}`);
+  }
+  
+  return response.json();
+}
+
+/**
+ * Fetch sheet values and convert to JSON with A1 notation keys
+ */
+async function getSheetValuesAsJson(
+  accessToken: string,
+  spreadsheetId: string,
+  sheetName: string
+): Promise<{ cellsJson: string; rowCount: number; colCount: number }> {
+  const encodedSheetName = encodeURIComponent(sheetName);
+  const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodedSheetName}`;
+  
+  const response = await fetch(apiUrl, {
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+    },
+  });
+  
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`API request failed with status ${response.status}: ${body}`);
+  }
+  
+  const data = await response.json();
+  const values: string[][] = data.values || [];
+  
+  // Convert 2D array to a map with A1 notation keys
+  const cells: Record<string, string> = {};
+  let colCount = 0;
+  
+  for (let rowIdx = 0; rowIdx < values.length; rowIdx++) {
+    const row = values[rowIdx];
+    if (row.length > colCount) {
+      colCount = row.length;
+    }
+    for (let colIdx = 0; colIdx < row.length; colIdx++) {
+      const value = row[colIdx];
+      if (value !== '') {
+        const cellRef = `${colIndexToLetter(colIdx)}${rowIdx + 1}`;
+        cells[cellRef] = value;
+      }
+    }
+  }
+  
+  return {
+    cellsJson: JSON.stringify(cells),
+    rowCount: values.length,
+    colCount,
+  };
+}
+
+/**
+ * Update sheet values via Google Sheets API
+ */
+async function updateSheetValues(
+  accessToken: string,
+  spreadsheetId: string,
+  range: string,
+  values: unknown[][]
+) {
+  const encodedRange = encodeURIComponent(range);
+  const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodedRange}?valueInputOption=USER_ENTERED`;
+  
+  const response = await fetch(apiUrl, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      range,
+      values,
+    }),
+  });
+  
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`API request failed with status ${response.status}: ${body}`);
+  }
+  
+  return response.json();
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+async function main() {
+  const server = sdk.create({
+    serverName: process.env.SERVER_NAME || 'ts-sheets-worker',
+    serverApiToken: process.env.SERVER_API_TOKEN,
+  });
+
+  // Read Google Sheets function
+  const readGoogleSheetsFn = sdk.newFunction({
+    name: 'read_google_sheets',
+    version: '1.0.0',
+    description: `Reads all sheets from a Google Sheets spreadsheet.
+
+INPUT:
+- url: The full Google Sheets URL (e.g., "https://docs.google.com/spreadsheets/d/1abc.../edit")
+
+OUTPUT:
+- title: The spreadsheet title
+- spreadsheet_id: The unique spreadsheet identifier
+- sheet_contents: Array of sheets, each containing:
+  - sheet_name: Name of the sheet tab
+  - cells: JSON object mapping cell references to values (e.g., {"A1": "Name", "B1": "Age"})
+  - row_count: Number of rows with data
+  - col_count: Number of columns with data
+
+Note: Empty cells are omitted from the cells object.`,
+    input: ReadGoogleSheetsInput,
+    output: ReadGoogleSheetsOutput,
+    handler: async (input, event, state) => {
+      // Send status message
+      await state.rpc?.sendStatusEvent(event, 'Reading Google Sheets...', { url: input.url });
+
+      if (!state.oauth) {
+        throw new Error('OAuth client not available');
+      }
+
+      // Parse the spreadsheet ID from the URL
+      const spreadsheetId = parseSpreadsheetId(input.url);
+
+      // Get Google OAuth token
+      const token = await state.oauth.getAccessToken('google', event.run);
+
+      // Get spreadsheet metadata
+      const metadata = await getSpreadsheetMetadata(token.accessToken, spreadsheetId);
+
+      // Fetch contents of each sheet
+      const sheetContents: z.infer<typeof SheetContent>[] = [];
+      
+      for (const sheet of metadata.sheets) {
+        await state.rpc?.sendStatusEvent(event, `Reading sheet: ${sheet.properties.title}`, {
+          spreadsheetId,
+          sheetName: sheet.properties.title,
+        });
+
+        const { cellsJson, rowCount, colCount } = await getSheetValuesAsJson(
+          token.accessToken,
+          spreadsheetId,
+          sheet.properties.title
+        );
+
+        sheetContents.push({
+          sheetName: sheet.properties.title,
+          cells: cellsJson,
+          rowCount,
+          colCount,
+        });
+      }
+
+      await state.rpc?.sendStatusEvent(event, 'Finished reading Google Sheets', {
+        spreadsheetId,
+        sheetsRead: sheetContents.length,
+      });
+
+      return {
+        sheetContents,
+        spreadsheetId,
+        title: metadata.properties.title,
+      };
+    },
+  });
+
+  // Update Google Sheets function
+  const updateGoogleSheetsFn = sdk.newFunction({
+    name: 'update_google_sheets',
+    version: '1.0.0',
+    description: `Updates cells in a Google Sheets spreadsheet.
+
+INPUT:
+- url: The full Google Sheets URL
+- sheet_name: The name of the sheet tab to update (e.g., "Sheet1")
+- range: The cell range in A1 notation. Examples:
+  - "A1" for a single cell
+  - "A1:C3" for a 3x3 range
+  - "A:A" for entire column A
+- values: A JSON 2D array matching the range dimensions. Examples:
+  - Single cell: [["new value"]]
+  - Row of 3 cells: [["a", "b", "c"]]
+  - 2x2 grid: [["a", "b"], ["c", "d"]]
+  - Formula: [["=SUM(A1:A10)"]]
+
+OUTPUT:
+- updated_range: The actual range that was updated
+- updated_rows: Number of rows updated
+- updated_columns: Number of columns updated
+- updated_cells: Total number of cells updated
+- spreadsheet_id: The spreadsheet identifier
+
+Note: Values are parsed like user input—formulas execute, dates are recognized.`,
+    input: UpdateGoogleSheetsInput,
+    output: UpdateGoogleSheetsOutput,
+    handler: async (input, event, state) => {
+      await state.rpc?.sendStatusEvent(event, 'Updating Google Sheets...', {
+        sheetName: input.sheetName,
+        range: input.range,
+      });
+
+      if (!state.oauth) {
+        throw new Error('OAuth client not available');
+      }
+
+      // Parse the spreadsheet ID from the URL
+      const spreadsheetId = parseSpreadsheetId(input.url);
+
+      // Parse the values JSON string into a 2D array
+      let values: unknown[][];
+      try {
+        values = JSON.parse(input.values);
+      } catch {
+        throw new Error(`Failed to parse values JSON: ${input.values}`);
+      }
+
+      // Get Google OAuth token
+      const token = await state.oauth.getAccessToken('google', event.run);
+
+      // Build the full range with sheet name
+      const fullRange = `${input.sheetName}!${input.range}`;
+
+      // Call the Sheets API to update values
+      const result = await updateSheetValues(token.accessToken, spreadsheetId, fullRange, values);
+
+      await state.rpc?.sendStatusEvent(event, 'Google Sheets updated successfully', {
+        updatedCells: result.updatedCells,
+        updatedRange: result.updatedRange,
+      });
+
+      return {
+        updatedRange: result.updatedRange,
+        updatedRows: result.updatedRows,
+        updatedColumns: result.updatedColumns,
+        updatedCells: result.updatedCells,
+        spreadsheetId: result.spreadsheetId,
+      };
+    },
+  });
+
+  server.registerFunction(readGoogleSheetsFn);
+  server.registerFunction(updateGoogleSheetsFn);
+
+  console.log('Starting Google Sheets worker...');
+  await server.start();
+}
+
+main().catch(console.error);
+

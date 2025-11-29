@@ -1,0 +1,44 @@
+{
+  "name": "@dibbla-agents/sdk-ts",
+  "version": "0.0.1",
+  "description": "Dibbla Agents SDK for TypeScript - Build workflow functions with gRPC communication",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "src/proto"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build",
+    "dev": "tsc --watch",
+    "lint": "eslint src --ext .ts",
+    "test": "node --test"
+  },
+  "keywords": [
+    "dibbla",
+    "agents",
+    "workflow",
+    "grpc",
+    "sdk"
+  ],
+  "author": "Dibbla",
+  "license": "MIT",
+  "dependencies": {
+    "@grpc/grpc-js": "^1.9.0",
+    "@grpc/proto-loader": "^0.7.0",
+    "dotenv": "^16.3.0",
+    "murmurhash3js": "^3.0.1",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/murmurhash3js": "^3.0.3",
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
