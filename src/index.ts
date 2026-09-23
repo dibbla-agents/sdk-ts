@@ -55,9 +55,13 @@ export {
   OAuthTokenResponse,
   OAuthProviderStatus,
   ExecutionNode,
+  InvocationContext,
   // Re-export Zod for convenience
   z,
 } from './function';
+
+// Verified caller identity
+export { Caller, callerFromEvent, IDENTITY_USER_AUTHENTICATED, MetaKeys } from './caller';
 
 // Type exports
 export {

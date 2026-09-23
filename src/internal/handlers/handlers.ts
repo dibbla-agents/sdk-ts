@@ -1,15 +1,16 @@
 import { EventMessage, Events, FunctionDefinition } from '../../types/events';
 import { functionKey } from '../../types/keys';
 import { WorkerFunction, GlobalState } from '../../function';
-import { GrpcCommunicator } from '../grpc/communicator';
 import { Dispatcher } from '../dispatcher/dispatcher';
 import { GrpcCacheClient } from '../cache/cache-client';
 import { GrpcStoreClient } from '../store/store-client';
 import { GrpcOAuthClient } from '../oauth/oauth-client';
 import { RpcClient } from '../rpc/rpc-client';
+import { log, errorMessage } from '../log';
 
 /**
- * EventState contains context for the current event being processed.
+ * The invocation fields a reply carries back: what the request named, plus
+ * the name this worker serves functions under.
  */
 export interface EventState {
   server: string;
@@ -22,13 +23,7 @@ export interface EventState {
   correlationId: string;
 }
 
-/**
- * Create an EventState from an EventMessage.
- */
-export function createEventState(
-  message: EventMessage,
-  functionServer: string
-): EventState {
+export function createEventState(message: EventMessage, functionServer: string): EventState {
   return {
     server: message.server,
     function: message.function,
@@ -41,12 +36,45 @@ export function createEventState(
   };
 }
 
+/** The pseudo-invocation the registration after connect is correlated with. */
+export function startupEventState(serverName: string): EventState {
+  return {
+    server: serverName,
+    function: '',
+    functionServer: serverName,
+    node: '',
+    workflow: '',
+    version: '',
+    run: '',
+    correlationId: 'startup',
+  };
+}
+
+/** The pseudo-invocation of the startup broadcast. */
+export function startupBroadcastEventState(serverName: string): EventState {
+  return {
+    server: serverName,
+    function: 'startup',
+    functionServer: serverName,
+    node: 'startup',
+    workflow: 'startup',
+    version: '1.0',
+    run: 'startup',
+    correlationId: 'startup',
+  };
+}
+
+export interface EventSender {
+  sendEvent(event: EventMessage): Promise<void>;
+  setMessageHandler(handler: (message: EventMessage) => void): void;
+}
+
 /**
  * HandlerContext contains all the services needed by handlers.
  */
 export interface HandlerContext {
   serverName: string;
-  communicator: GrpcCommunicator;
+  communicator: EventSender;
   dispatcher: Dispatcher;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   functions: Map<string, WorkerFunction<any, any>>;
@@ -54,10 +82,12 @@ export interface HandlerContext {
   storeClient: GrpcStoreClient;
   oauthClient: GrpcOAuthClient;
   rpcClient: RpcClient;
+  globalState: GlobalState;
 }
 
 /**
- * Events that don't require a workflow field.
+ * Events accepted without a workflow: responses to the worker's own
+ * requests, discovery, capability provider traffic and job triggers.
  */
 function isWorkflowOptionalEvent(event: string): boolean {
   switch (event) {
@@ -71,280 +101,137 @@ function isWorkflowOptionalEvent(event: string): boolean {
     case Events.RequestServerInfo:
     case Events.RequestServerName:
     case Events.RequestListFunctions:
+    case Events.CapabilityProviderRequest:
+    case Events.CapabilityProviderCancel:
+    case Events.CapabilityCatalog:
+    case Events.JobTrigger:
       return true;
     default:
       return false;
   }
 }
 
+function reply(state: EventState, event: string, fields: Partial<EventMessage> = {}): EventMessage {
+  return {
+    function: state.function,
+    node: state.node,
+    workflow: state.workflow,
+    version: state.version,
+    server: '',
+    event,
+    text: '',
+    run: state.run,
+    meta: null,
+    payload: null,
+    correlationId: state.correlationId,
+    ...fields,
+  };
+}
+
+async function send(ctx: { communicator: EventSender }, event: EventMessage, what: string): Promise<void> {
+  try {
+    await ctx.communicator.sendEvent(event);
+  } catch (err) {
+    log.error(`Failed to send ${what}: ${errorMessage(err)}`);
+  }
+}
+
+export async function sendErrorEvent(ctx: { communicator: EventSender }, state: EventState, errorText: string): Promise<void> {
+  await send(ctx, reply(state, Events.Error, { text: errorText }), 'error event');
+}
+
+async function sendFunctionResponse(ctx: HandlerContext, state: EventState, payload: Buffer): Promise<void> {
+  await send(ctx, reply(state, Events.FunctionResponse, { payload }), 'function response');
+}
+
+/** Announces every registered function (response_list_functions). */
+export async function handleListFunctions(ctx: Pick<HandlerContext, 'communicator' | 'functions' | 'serverName'>, state: EventState): Promise<void> {
+  const definitions: FunctionDefinition[] = Array.from(ctx.functions.values(), (fn) => fn.getDefinition());
+  await send(
+    ctx,
+    reply(state, Events.ResponseListFunctions, {
+      server: ctx.serverName,
+      text: 'List of functions',
+      payload: Buffer.from(JSON.stringify(definitions)),
+    }),
+    'list functions response',
+  );
+}
+
+async function handleServerName(ctx: HandlerContext, state: EventState): Promise<void> {
+  await send(ctx, reply(state, Events.ResponseServerName, { server: ctx.serverName, text: ctx.serverName }), 'server name response');
+}
+
+async function handleFunctionRequest(ctx: HandlerContext, message: EventMessage): Promise<void> {
+  const state = createEventState(message, ctx.serverName);
+  log.debug(`Received function request: ${message.function}`);
+  const fn = ctx.functions.get(functionKey(state.functionServer, state.function, state.version));
+  if (!fn) {
+    await sendErrorEvent(ctx, state, 'Function not found');
+    return;
+  }
+  let output: Buffer;
+  try {
+    output = await fn.execute(message.payload, message, ctx.globalState);
+  } catch (err) {
+    await sendErrorEvent(ctx, state, `Function execution failed: ${errorMessage(err)}`);
+    return;
+  }
+  await sendFunctionResponse(ctx, state, output);
+}
+
 /**
  * Register all event handlers with the dispatcher.
  */
 export function registerHandlers(ctx: HandlerContext): void {
-  const { dispatcher, communicator, functions, cacheClient, storeClient, oauthClient, rpcClient, serverName } = ctx;
+  const { dispatcher } = ctx;
 
-  // Function request handler
-  dispatcher.register(Events.FunctionRequest, async (message) => {
-    console.log(`[DEBUG HANDLER] ==================== FUNCTION REQUEST ====================`);
-    console.log(`[DEBUG HANDLER] Function requested: ${message.function}:${message.version}`);
-    console.log(`[DEBUG HANDLER] Server name from config: ${serverName}`);
-    
-    const eventState = createEventState(message, serverName);
-    console.log(`[DEBUG HANDLER] Event state created:`, JSON.stringify(eventState, null, 2));
+  // Function calls run in the pool.
+  dispatcher.register(Events.FunctionRequest, (message) => handleFunctionRequest(ctx, message));
 
-    const key = functionKey(serverName, message.function, message.version);
-    console.log(`[DEBUG HANDLER] Looking up function with key: ${key}`);
-    console.log(`[DEBUG HANDLER] Available functions: ${Array.from(functions.keys()).join(', ')}`);
-    
-    const fn = functions.get(key);
-    console.log(`[DEBUG HANDLER] Function found: ${!!fn}`);
+  // Responses to this worker's own requests unpark pooled handlers, so they
+  // must never wait for a pool slot (FAT-19).
+  dispatcher.registerDirect(Events.FunctionResponse, (message) => ctx.rpcClient.handleCallResponse(message));
+  dispatcher.registerDirect(Events.CacheGetResponse, (message) => ctx.cacheClient.handleResponse(message));
+  dispatcher.registerDirect(Events.CacheSetResponse, (message) => ctx.cacheClient.handleResponse(message));
+  dispatcher.registerDirect(Events.StoreGetResponse, (message) => ctx.storeClient.handleResponse(message));
+  dispatcher.registerDirect(Events.StoreSetResponse, (message) => ctx.storeClient.handleResponse(message));
+  dispatcher.registerDirect(Events.OAuthTokenResponse, (message) => ctx.oauthClient.handleResponse(message));
+  dispatcher.registerDirect(Events.OAuthStatusResponse, (message) => ctx.oauthClient.handleResponse(message));
+  dispatcher.registerDirect(Events.OAuthError, (message) => ctx.oauthClient.handleResponse(message));
 
-    if (!fn) {
-      console.log(`[DEBUG HANDLER] ERROR: Function not found for key: ${key}`);
-      await sendErrorEvent(communicator, eventState, 'Function not found');
-      return;
-    }
-
-    try {
-      console.log(`[DEBUG HANDLER] Creating global state...`);
-      const globalState: GlobalState = {
-        serverName,
-        cache: cacheClient,
-        store: storeClient,
-        oauth: oauthClient,
-        rpc: rpcClient,
-      };
-
-      console.log(`[DEBUG HANDLER] Executing function ${fn.name}...`);
-      console.log(`[DEBUG HANDLER] Payload: ${message.payload?.toString().substring(0, 500)}`);
-      
-      const output = await fn.execute(message.payload!, message, globalState);
-      
-      console.log(`[DEBUG HANDLER] Function executed successfully!`);
-      console.log(`[DEBUG HANDLER] Output length: ${output.length}`);
-      console.log(`[DEBUG HANDLER] Output preview: ${output.toString().substring(0, 500)}`);
-      
-      await sendFunctionResponse(communicator, eventState, output);
-      console.log(`[DEBUG HANDLER] Response sent!`);
-    } catch (err) {
-      console.log(`[DEBUG HANDLER] ERROR during execution: ${(err as Error).message}`);
-      console.log(`[DEBUG HANDLER] Stack trace: ${(err as Error).stack}`);
-      await sendErrorEvent(communicator, eventState, `Function execution failed: ${(err as Error).message}`);
-    }
-  });
-
-  // Function response handler (for RPC calls)
-  dispatcher.register(Events.FunctionResponse, (message) => {
-    rpcClient.handleCallResponse(message);
-  });
-
-  // Cache response handlers
-  dispatcher.register(Events.CacheGetResponse, (message) => {
-    cacheClient.handleResponse(message);
-  });
-  dispatcher.register(Events.CacheSetResponse, (message) => {
-    cacheClient.handleResponse(message);
-  });
-
-  // Store response handlers
-  dispatcher.register(Events.StoreGetResponse, (message) => {
-    storeClient.handleResponse(message);
-  });
-  dispatcher.register(Events.StoreSetResponse, (message) => {
-    storeClient.handleResponse(message);
-  });
-
-  // OAuth response handlers
-  dispatcher.register(Events.OAuthTokenResponse, (message) => {
-    oauthClient.handleResponse(message);
-  });
-  dispatcher.register(Events.OAuthStatusResponse, (message) => {
-    oauthClient.handleResponse(message);
-  });
-  dispatcher.register(Events.OAuthError, (message) => {
-    oauthClient.handleResponse(message);
-  });
-
-  // Server info request handlers
-  dispatcher.register(Events.RequestListFunctions, async (message) => {
-    const eventState = createEventState(message, serverName);
-    await handleListFunctions(communicator, functions, eventState);
-  });
-
-  dispatcher.register(Events.RequestServerName, async (message) => {
-    const eventState = createEventState(message, serverName);
-    await handleServerName(communicator, serverName, eventState);
-  });
-
-  dispatcher.register(Events.RequestServerInfo, async (message) => {
-    const eventState = createEventState(message, serverName);
-    await handleServerName(communicator, serverName, eventState);
-    await handleListFunctions(communicator, functions, eventState);
+  // Discovery.
+  dispatcher.registerDirect(Events.RequestListFunctions, (message) =>
+    handleListFunctions(ctx, createEventState(message, ctx.serverName)),
+  );
+  dispatcher.registerDirect(Events.RequestServerName, (message) => handleServerName(ctx, createEventState(message, ctx.serverName)));
+  dispatcher.registerDirect(Events.RequestServerInfo, async (message) => {
+    const state = createEventState(message, ctx.serverName);
+    await handleServerName(ctx, state);
+    await handleListFunctions(ctx, state);
   });
 }
 
 /**
- * Start listening for incoming messages and dispatching them.
+ * Feeds incoming messages to the dispatcher.
  */
 export function startMessageListener(ctx: HandlerContext): void {
-  const { communicator, dispatcher, serverName } = ctx;
-
-  console.log(`[DEBUG LISTENER] Starting message listener for server: ${serverName}`);
-  console.log(`[DEBUG LISTENER] Registered handlers: ${Array.from(ctx.functions.keys()).join(', ')}`);
+  const { communicator, dispatcher } = ctx;
 
   communicator.setMessageHandler((message: EventMessage) => {
-    console.log(`[DEBUG LISTENER] ==================== INCOMING MESSAGE ====================`);
-    console.log(`[DEBUG LISTENER] Event type: ${message.event}`);
-    console.log(`[DEBUG LISTENER] Function: ${message.function}`);
-    console.log(`[DEBUG LISTENER] Version: ${message.version}`);
-    console.log(`[DEBUG LISTENER] Node: ${message.node}`);
-    console.log(`[DEBUG LISTENER] Workflow: ${message.workflow}`);
-    console.log(`[DEBUG LISTENER] Run: ${message.run}`);
-    console.log(`[DEBUG LISTENER] Server: ${message.server}`);
-    console.log(`[DEBUG LISTENER] CorrelationId: ${message.correlationId}`);
-    console.log(`[DEBUG LISTENER] Has payload: ${!!message.payload}`);
-    if (message.payload) {
-      console.log(`[DEBUG LISTENER] Payload length: ${message.payload.length}`);
-      try {
-        console.log(`[DEBUG LISTENER] Payload content: ${message.payload.toString().substring(0, 500)}`);
-      } catch (e) {
-        console.log(`[DEBUG LISTENER] Payload (binary): ${message.payload.length} bytes`);
-      }
-    }
-    console.log(`[DEBUG LISTENER] Is workflow optional event: ${isWorkflowOptionalEvent(message.event)}`);
-    console.log(`[DEBUG LISTENER] Has handler for event: ${dispatcher.hasHandler(message.event)}`);
-
+    if (message.event === Events.Pong) return;
     if (!message.workflow && !isWorkflowOptionalEvent(message.event)) {
-      console.log('[DEBUG LISTENER] SKIPPING: Workflow is empty and not an optional event');
+      log.debug(`Dropping ${message.event} without a workflow`);
       return;
     }
+    if (dispatcher.dispatch(message)) return;
 
-    console.log(`[DEBUG LISTENER] Dispatching message to handler...`);
-    dispatcher.dispatch(message);
+    // The pool queue is full. Fail the caller fast instead of letting it
+    // wait out its timeout; responses keep flowing because they dispatch
+    // direct.
+    log.warn(`Dispatcher queue full, dropping event: ${message.event} (workflow: ${message.workflow})`);
+    if (message.event === Events.FunctionRequest) {
+      void sendErrorEvent(ctx, createEventState(message, ctx.serverName), 'Worker overloaded: dispatcher queue full, request dropped');
+    }
   });
 }
-
-/**
- * Send an error event.
- */
-async function sendErrorEvent(
-  communicator: GrpcCommunicator,
-  eventState: EventState,
-  errorText: string
-): Promise<void> {
-  const event: EventMessage = {
-    function: eventState.function,
-    node: eventState.node,
-    workflow: eventState.workflow,
-    version: eventState.version,
-    server: eventState.functionServer,
-    event: Events.Error,
-    text: errorText,
-    run: eventState.run,
-    meta: null,
-    payload: null,
-    correlationId: eventState.correlationId,
-  };
-
-  try {
-    await communicator.sendEvent(event);
-  } catch (err) {
-    console.error(`Failed to send error event: ${(err as Error).message}`);
-  }
-}
-
-/**
- * Send a function response.
- */
-async function sendFunctionResponse(
-  communicator: GrpcCommunicator,
-  eventState: EventState,
-  payload: Buffer
-): Promise<void> {
-  const event: EventMessage = {
-    function: eventState.function,
-    node: eventState.node,
-    workflow: eventState.workflow,
-    version: eventState.version,
-    server: eventState.functionServer,
-    event: Events.FunctionResponse,
-    text: '',
-    run: eventState.run,
-    meta: null,
-    payload,
-    correlationId: eventState.correlationId,
-  };
-
-  try {
-    await communicator.sendEvent(event);
-  } catch (err) {
-    console.error(`Failed to send function response: ${(err as Error).message}`);
-  }
-}
-
-/**
- * Handle a request for the function list.
- */
-async function handleListFunctions(
-  communicator: GrpcCommunicator,
-  functions: Map<string, WorkerFunction>,
-  eventState: EventState
-): Promise<void> {
-  const definitions: FunctionDefinition[] = [];
-
-  functions.forEach((fn) => {
-    definitions.push(fn.getDefinition());
-  });
-
-  const payload = Buffer.from(JSON.stringify(definitions));
-
-  const event: EventMessage = {
-    function: eventState.function,
-    node: eventState.node,
-    workflow: eventState.workflow,
-    version: eventState.version,
-    server: eventState.functionServer,
-    event: Events.ResponseListFunctions,
-    text: 'List of functions',
-    run: eventState.run,
-    meta: null,
-    payload,
-    correlationId: eventState.correlationId,
-  };
-
-  try {
-    await communicator.sendEvent(event);
-  } catch (err) {
-    console.error(`Failed to send list functions response: ${(err as Error).message}`);
-  }
-}
-
-/**
- * Handle a request for the server name.
- */
-async function handleServerName(
-  communicator: GrpcCommunicator,
-  serverName: string,
-  eventState: EventState
-): Promise<void> {
-  const event: EventMessage = {
-    function: eventState.function,
-    node: eventState.node,
-    workflow: eventState.workflow,
-    version: eventState.version,
-    server: serverName,
-    event: Events.ResponseServerName,
-    text: serverName,
-    run: eventState.run,
-    meta: null,
-    payload: null,
-    correlationId: eventState.correlationId,
-  };
-
-  try {
-    await communicator.sendEvent(event);
-  } catch (err) {
-    console.error(`Failed to send server name response: ${(err as Error).message}`);
-  }
-}
-

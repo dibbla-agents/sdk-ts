@@ -38,12 +38,37 @@ export const Events = {
   ResponseServerName: 'response_server_name',
   RequestServerInfo: 'request_server_info',
 
+  // Capability providers (DIB-131): worker → server registration and
+  // server → worker provider invocation.
+  ResponseListCapabilityProviders: 'response_list_capability_providers',
+  CapabilityProviderRequest: 'capability_provider_request',
+  CapabilityProviderResponse: 'capability_provider_response',
+  // One-way catalog pre-sync (DIB-152): the engine pushes the full
+  // tool_search stub set at run start. No reply is expected.
+  CapabilityCatalog: 'capability_catalog',
+  // The engine's one-way abandon notice (DIB-443): the call with this
+  // correlation id timed out or its run was terminated.
+  CapabilityProviderCancel: 'capability_provider_cancel',
+
   // OAuth events
   OAuthTokenRequest: 'oauth_token_request',
   OAuthTokenResponse: 'oauth_token_response',
   OAuthStatusRequest: 'oauth_status_request',
   OAuthStatusResponse: 'oauth_status_response',
   OAuthError: 'oauth_error',
+
+  // Jobs: long-running job execution
+  JobRegistration: 'job_registration',
+  JobTrigger: 'job_trigger',
+  JobStarted: 'job_started',
+  JobCompleted: 'job_completed',
+  JobFailed: 'job_failed',
+  TaskStarted: 'task_started',
+  TaskCompleted: 'task_completed',
+  TaskFailed: 'task_failed',
+  TaskSkipped: 'task_skipped',
+  LogMessage: 'log_message',
+  ProgressUpdate: 'progress_update',
 } as const;
 
 export type EventType = (typeof Events)[keyof typeof Events];

@@ -1,13 +1,10 @@
 import { randomBytes } from 'crypto';
 
 /**
- * Generate a random UID in the format "d83a-f68e"
- * Matches the Go SDK's utils.UID() function
+ * A random correlation id like "d83af68e-1b2c3d4e": 64 bits of entropy in
+ * sdk-go's format. Callers treat it as opaque.
  */
 export function uid(): string {
-  const bytes = randomBytes(4);
-  const part1 = bytes.readUInt16BE(0).toString(16).padStart(4, '0');
-  const part2 = bytes.readUInt16BE(2).toString(16).padStart(4, '0');
-  return `${part1}-${part2}`;
+  const bytes = randomBytes(8);
+  return `${bytes.subarray(0, 4).toString('hex')}-${bytes.subarray(4).toString('hex')}`;
 }
-

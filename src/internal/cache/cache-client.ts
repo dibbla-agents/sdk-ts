@@ -133,7 +133,8 @@ export class GrpcCacheClient {
    * Set a cached value by numeric key with TTL.
    */
   async setWithTTL(key: bigint, value: Buffer, ttlMs: number): Promise<void> {
-    const ttlSeconds = Math.ceil(ttlMs / 1000);
+    // Whole seconds, truncated, as sdk-go sends int64(ttl.Seconds()).
+    const ttlSeconds = Math.trunc(ttlMs / 1000);
     return this.setByString(key.toString(), value, ttlSeconds);
   }
 

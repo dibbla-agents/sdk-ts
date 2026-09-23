@@ -2,6 +2,8 @@ import { z, ZodTypeAny } from 'zod';
 import { EventMessage, FunctionDefinition } from './types/events';
 import { generateHash } from './internal/utils/hash';
 import { zodToSchemaString } from './internal/utils/schema';
+import { log } from './internal/log';
+import { Caller, callerFromEvent } from './caller';
 
 /**
  * Coerce input data to match the expected Zod schema types.
@@ -103,7 +105,7 @@ export interface GlobalState {
 export interface CacheClient {
   get(key: bigint): Promise<Buffer | null>;
   set(key: bigint, value: Buffer): Promise<void>;
-  setWithTTL(key: bigint, value: Buffer, ttlSeconds: number): Promise<void>;
+  setWithTTL(key: bigint, value: Buffer, ttlMs: number): Promise<void>;
   getByString(key: string): Promise<Buffer | null>;
   setByString(key: string, value: Buffer, ttlSeconds?: number): Promise<void>;
 }
@@ -164,6 +166,25 @@ export interface FunctionCache {
 }
 
 /**
+ * What a simple function's handler learns about the invocation besides its input.
+ */
+export interface InvocationContext {
+  /**
+   * The platform-verified caller, or null when none was asserted (e.g. an
+   * invocation inside a workflow run). Never derived from the input.
+   */
+  caller: Caller | null;
+  /**
+   * Cancellation for the invocation. The platform sends no deadline for
+   * function calls today, so it never aborts yet; pass it to your I/O anyway
+   * and a deadline will reach it without changing your handler.
+   */
+  signal: AbortSignal;
+  /** The raw invocation event (workflow, run, node, correlation id). */
+  event: EventMessage;
+}
+
+/**
  * WorkerFunction represents a registered function that can be invoked.
  */
 export interface WorkerFunction<TInput = unknown, TOutput = unknown> {
@@ -180,13 +201,19 @@ export interface WorkerFunction<TInput = unknown, TOutput = unknown> {
 
   // Methods
   getDefinition(): FunctionDefinition;
-  execute(payload: Buffer, eventMessage: EventMessage, globalState: GlobalState): Promise<Buffer>;
+  /**
+   * Runs the function on a request payload and returns the response payload.
+   * Failures throw with the text sdk-go reports after "Function execution
+   * failed: ".
+   */
+  execute(payload: Buffer | null, eventMessage: EventMessage, globalState: GlobalState): Promise<Buffer>;
   setCache(cache: FunctionCache): void;
   setServer(name: string): void;
 }
 
 /**
  * Handler type for advanced functions with access to event state and global state.
+ * The caller is available through callerFromEvent(event).
  */
 export type FunctionHandler<TInput, TOutput> = (
   input: TInput,
@@ -197,7 +224,10 @@ export type FunctionHandler<TInput, TOutput> = (
 /**
  * Handler type for simple input->output functions.
  */
-export type SimpleFunctionHandler<TInput, TOutput> = (input: TInput) => TOutput | Promise<TOutput>;
+export type SimpleFunctionHandler<TInput, TOutput> = (
+  input: TInput,
+  context: InvocationContext
+) => TOutput | Promise<TOutput>;
 
 /**
  * Options for creating a new function.
@@ -210,6 +240,7 @@ export interface FunctionOptions<TInput, TOutput> {
   output: z.ZodType<TOutput>;
   handler: FunctionHandler<TInput, TOutput>;
   tags?: string[];
+  /** Cache results for this long (ms). 0 (default) disables caching; below 0 uses the server's default TTL. */
   cacheTTLMs?: number;
 }
 
@@ -224,6 +255,15 @@ export interface SimpleFunctionOptions<TInput, TOutput> {
   output: z.ZodType<TOutput>;
   handler: SimpleFunctionHandler<TInput, TOutput>;
   tags?: string[];
+}
+
+/** An error whose message is already in sdk-go's wording. */
+class ExecutionError extends Error {}
+
+const NEVER_ABORTS = new AbortController().signal;
+
+function describeZodError(err: z.ZodError): string {
+  return err.issues.map((i) => (i.path.length ? `${i.path.join('.')}: ${i.message}` : i.message)).join('; ');
 }
 
 /**
@@ -267,8 +307,8 @@ class WorkerFunctionImpl<TInput, TOutput> implements WorkerFunction<TInput, TOut
     this.isSimple = isSimple;
 
     // Generate flattened type schemas matching the Go SDK format
-    this.inputJsonSchema = zodToSchemaString(inputSchema);
-    this.outputJsonSchema = zodToSchemaString(outputSchema);
+    this.inputJsonSchema = zodToSchemaString(inputSchema, 'input');
+    this.outputJsonSchema = zodToSchemaString(outputSchema, 'output');
   }
 
   setCache(cache: FunctionCache): void {
@@ -291,94 +331,72 @@ class WorkerFunctionImpl<TInput, TOutput> implements WorkerFunction<TInput, TOut
     };
   }
 
-  async execute(
-    payload: Buffer,
-    eventMessage: EventMessage,
-    globalState: GlobalState
-  ): Promise<Buffer> {
-    console.log(`[DEBUG FUNCTION] ==================== EXECUTE START ====================`);
-    console.log(`[DEBUG FUNCTION] Function: ${this.name}:${this.version}`);
-    console.log(`[DEBUG FUNCTION] Is simple: ${this.isSimple}`);
-    console.log(`[DEBUG FUNCTION] Payload length: ${payload?.length ?? 0}`);
-    console.log(`[DEBUG FUNCTION] Payload content: ${payload?.toString().substring(0, 500)}`);
-    
-    // Check cache if enabled
-    if (this.cache && this.cacheTTLMs > 0) {
-      const cacheKey = generateHash(payload, this.name, this.version);
-      console.log(`[DEBUG FUNCTION] Cache lookup [${this.name}:${this.version}] Key: ${cacheKey}`);
+  async execute(payload: Buffer | null, eventMessage: EventMessage, globalState: GlobalState): Promise<Buffer> {
+    const raw = payload ?? Buffer.alloc(0);
+    const caching = this.cache !== null && this.cacheTTLMs !== 0;
+    const cacheKey = caching ? generateHash(raw, this.name, this.version) : 0n;
 
-      const cachedResult = await this.cache.get(cacheKey);
-      if (cachedResult) {
-        console.log(`[DEBUG FUNCTION] Cache HIT [${this.name}:${this.version}]`);
-        return cachedResult;
+    if (caching) {
+      // A cache that cannot answer is a miss, as in sdk-go.
+      const cached = await this.cache!.get(cacheKey).catch((err) => {
+        log.warn(`Cache lookup failed [${this.name}:${this.version}]: ${(err as Error).message}`);
+        return null;
+      });
+      if (cached && cached.length > 0) {
+        log.debug(`Cache HIT [${this.name}:${this.version}] Key: ${cacheKey}`);
+        return cached;
       }
-      console.log(`[DEBUG FUNCTION] Cache MISS [${this.name}:${this.version}]`);
+      log.debug(`Cache MISS [${this.name}:${this.version}] Key: ${cacheKey}`);
     }
 
-    // Parse and validate input
     let input: TInput;
     try {
-      console.log(`[DEBUG FUNCTION] Parsing input JSON...`);
-      const rawInput = JSON.parse(payload.toString());
-      console.log(`[DEBUG FUNCTION] Raw input:`, JSON.stringify(rawInput, null, 2));
-      
-      console.log(`[DEBUG FUNCTION] Coercing input types to match schema...`);
-      const coercedInput = coerceToSchema(rawInput, this.inputSchema);
-      console.log(`[DEBUG FUNCTION] Coerced input:`, JSON.stringify(coercedInput, null, 2));
-      
-      console.log(`[DEBUG FUNCTION] Validating input against schema...`);
-      input = this.inputSchema.parse(coercedInput);
-      console.log(`[DEBUG FUNCTION] Input validated successfully:`, JSON.stringify(input, null, 2));
+      const parsed = this.inputSchema.safeParse(coerceToSchema(JSON.parse(raw.toString('utf8')), this.inputSchema));
+      if (!parsed.success) throw new Error(describeZodError(parsed.error));
+      input = parsed.data;
     } catch (err) {
-      console.log(`[DEBUG FUNCTION] ERROR parsing/validating input: ${(err as Error).message}`);
-      throw new Error(`Failed to parse/validate input: ${(err as Error).message}`);
+      throw new ExecutionError(`failed to unmarshal input: ${(err as Error).message}`);
     }
 
-    // Execute handler
-    let output: TOutput;
+    let output: unknown;
     try {
-      console.log(`[DEBUG FUNCTION] Executing handler (isSimple: ${this.isSimple})...`);
-      if (this.isSimple) {
-        console.log(`[DEBUG FUNCTION] Calling simple handler...`);
-        output = await (this.handler as SimpleFunctionHandler<TInput, TOutput>)(input);
-      } else {
-        console.log(`[DEBUG FUNCTION] Calling advanced handler with event and state...`);
-        output = await (this.handler as FunctionHandler<TInput, TOutput>)(
-          input,
-          eventMessage,
-          globalState
-        );
+      if (typeof this.handler !== 'function') {
+        // A wiring mistake from untyped callers: name the function instead of a TypeError.
+        throw new Error(`function "${this.name}" (version ${this.version}) was registered without a handler`);
       }
-      console.log(`[DEBUG FUNCTION] Handler returned:`, JSON.stringify(output, null, 2));
+      if (this.isSimple) {
+        const context: InvocationContext = { caller: callerFromEvent(eventMessage), signal: NEVER_ABORTS, event: eventMessage };
+        output = await (this.handler as SimpleFunctionHandler<TInput, TOutput>)(input, context);
+      } else {
+        output = await (this.handler as FunctionHandler<TInput, TOutput>)(input, eventMessage, globalState);
+      }
+      // What leaves the worker is what the output schema says, as Go's
+      // json.Marshal of the output struct would be.
+      const checked = this.outputSchema.safeParse(output);
+      if (!checked.success) throw new Error(`output does not match the output schema: ${describeZodError(checked.error)}`);
+      output = checked.data;
     } catch (err) {
-      console.log(`[DEBUG FUNCTION] ERROR in handler: ${(err as Error).message}`);
-      console.log(`[DEBUG FUNCTION] Stack trace: ${(err as Error).stack}`);
-      throw new Error(`Handler error: ${(err as Error).message}`);
+      throw new ExecutionError(`handler error: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    // Validate output
+    let result: Buffer;
     try {
-      console.log(`[DEBUG FUNCTION] Validating output against schema...`);
-      this.outputSchema.parse(output);
-      console.log(`[DEBUG FUNCTION] Output validated successfully`);
+      result = Buffer.from(JSON.stringify(output) ?? 'null');
     } catch (err) {
-      console.log(`[DEBUG FUNCTION] ERROR validating output: ${(err as Error).message}`);
-      throw new Error(`Output validation failed: ${(err as Error).message}`);
+      throw new ExecutionError(`failed to marshal output: ${(err as Error).message}`);
     }
 
-    // Serialize output
-    const outputBuffer = Buffer.from(JSON.stringify(output));
-    console.log(`[DEBUG FUNCTION] Output serialized, length: ${outputBuffer.length}`);
-
-    // Cache result if enabled
-    if (this.cache && this.cacheTTLMs > 0) {
-      const cacheKey = generateHash(payload, this.name, this.version);
-      await this.cache.setWithTTL(cacheKey, outputBuffer, this.cacheTTLMs);
-      console.log(`[DEBUG FUNCTION] Cache STORE [${this.name}:${this.version}] Key: ${cacheKey} (TTL: ${this.cacheTTLMs}ms)`);
+    if (caching) {
+      try {
+        if (this.cacheTTLMs > 0) await this.cache!.setWithTTL(cacheKey, result, this.cacheTTLMs);
+        else await this.cache!.set(cacheKey, result);
+        log.debug(`Cache STORE [${this.name}:${this.version}] Key: ${cacheKey}`);
+      } catch (err) {
+        // Failing to cache must not fail a call that succeeded.
+        log.warn(`Cache store failed [${this.name}:${this.version}]: ${(err as Error).message}`);
+      }
     }
-
-    console.log(`[DEBUG FUNCTION] ==================== EXECUTE END ====================`);
-    return outputBuffer;
+    return result;
   }
 }
 
@@ -403,6 +421,8 @@ export function newFunction<TInput, TOutput>(
 
 /**
  * Create a simple function that only handles input->output transformation.
+ * The handler also receives the invocation context: the verified caller and
+ * a cancellation signal.
  */
 export function newSimpleFunction<TInput, TOutput>(
   options: SimpleFunctionOptions<TInput, TOutput>
@@ -422,4 +442,3 @@ export function newSimpleFunction<TInput, TOutput>(
 
 // Re-export z from zod for convenience
 export { z } from 'zod';
-

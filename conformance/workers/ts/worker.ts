@@ -46,6 +46,32 @@ server.registerFunctions([
       throw new Error('boom');
     },
   }),
+  sdk.newSimpleFunction({
+    name: 'whoami',
+    version: '1.0.0',
+    description: 'Report the verified caller',
+    input: z.object({ query: z.string() }),
+    output: z.object({
+      present: z.boolean(),
+      is_user: z.boolean(),
+      identity: z.string(),
+      user_id: z.string(),
+      email: z.string(),
+      name: z.string(),
+      org_id: z.string(),
+      org_role: z.string(),
+    }),
+    handler: (_input, { caller }) => ({
+      present: caller !== null,
+      is_user: caller?.isUser() ?? false,
+      identity: caller?.identity ?? '',
+      user_id: caller?.userId ?? '',
+      email: caller?.email ?? '',
+      name: caller?.name ?? '',
+      org_id: caller?.orgId ?? '',
+      org_role: caller?.orgRole ?? '',
+    }),
+  }),
   sdk.newFunction({
     name: 'cached_upper',
     version: '1.0.0',
@@ -101,8 +127,8 @@ server.registerFunctions([
   }),
 ]);
 
-// Not expressible in this SDK version: whoami (no caller API), the five
-// capability providers, and count_job.
+// Not expressible in this SDK version yet: the five capability providers and
+// count_job.
 
 server.start().catch((err) => {
   console.error(err);

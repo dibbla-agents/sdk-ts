@@ -146,13 +146,16 @@ const fn = sdk.newSimpleFunction({
   description: 'A simple function',
   input: MyInputSchema,
   output: MyOutputSchema,
-  handler: (input) => {
-    // Your logic here
+  handler: (input, { caller, signal }) => {
+    // Your logic here. caller is the verified user, if any; see below.
     return output;
   },
   tags: ['tag1', 'tag2'], // Optional - see note below
 });
 ```
+
+A failing handler (a thrown error or rejected promise) is reported to the
+caller as `Function execution failed: handler error: <message>`.
 
 > **Note on Tags**: The `tags` field is optional and currently not used by most workflow features. It is included for future use cases such as function discovery, filtering, or categorization. You can omit it or leave it as an empty array.
 
@@ -178,20 +181,56 @@ const fn = sdk.newFunction({
 });
 ```
 
+### Knowing Who Is Calling
+
+A function exposed as a directly callable tool runs on behalf of a person.
+When a signed-in user calls it (platform MCP, API or CLI), the platform
+asserts who they are. The SDK hands that to simple handlers as
+`context.caller`, and advanced handlers can read it with
+`sdk.callerFromEvent(event)`:
+
+```typescript
+const myNotes = sdk.newSimpleFunction({
+  name: 'my_notes',
+  version: '1.0.0',
+  description: "List the caller's notes",
+  input: z.object({ query: z.string() }),
+  output: z.object({ notes: z.array(z.string()) }),
+  handler: async (input, { caller }) => {
+    if (!caller?.isUser()) {
+      throw new Error('this function needs a signed-in user');
+    }
+    return { notes: await notesFor(caller.userId, input.query) };
+  },
+});
+```
+
+`caller` is `null` when the platform asserted no identity, for instance for a
+call from inside a workflow run. Treat that as "no user", never as a default
+user. The values come from the platform, outside the payload, so an input
+field can never impersonate anyone. Never read identity from inputs. Prefer
+`userId` as a database key (an email can be reassigned), and in a worker that
+serves one organization, reject calls whose `orgId` is not yours.
+
 ## Features
 
 ### Type-Safe Functions with Zod
 
 - Define input/output schemas using Zod
-- Automatic JSON Schema generation for function registration
-- Runtime validation of inputs and outputs
+- Schemas are published to the platform in the same flattened format sdk-go
+  uses: `{"tags": "[]string", "items[].name": "string", "nested.inner": "string"}`.
+  Arrays are declared under the key callers send, with `[]` describing the
+  elements of object arrays.
+- Runtime validation of inputs and outputs. Keys not in the output schema are
+  dropped before the response is sent.
 - Full TypeScript type inference
 
 ### Built-in Caching
 
-- Per-function cache TTL configuration
-- Automatic cache key generation using murmur3 hash
-- gRPC-based distributed cache
+- Per-function cache TTL configuration (`cacheTTLMs`; whole seconds on the wire)
+- Cache keys are MurmurHash3 over the payload bytes, function name and version,
+  identical to sdk-go's
+- gRPC-based distributed cache. A cache that doesn't answer counts as a miss
 
 ### OAuth Access Tokens
 
