@@ -30,7 +30,8 @@
     "test": "node --import tsx --test \"test/**/*.test.ts\"",
     "conformance": "CONFORMANCE_WORKER=ts node --import tsx --test conformance/conformance.test.ts",
     "conformance:packed": "CONFORMANCE_TS_SDK=packed-cjs npm run conformance && CONFORMANCE_TS_SDK=packed-esm npm run conformance",
-    "conformance:go": "CONFORMANCE_WORKER=go node --import tsx --test conformance/conformance.test.ts"
+    "conformance:go": "CONFORMANCE_WORKER=go node --import tsx --test conformance/conformance.test.ts",
+    "conformance:registry": "CONFORMANCE_TS_SDK=registry-cjs npm run conformance && CONFORMANCE_TS_SDK=registry-esm npm run conformance"
   },
   "keywords": [
     "dibbla",

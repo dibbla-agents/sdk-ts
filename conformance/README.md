@@ -33,7 +33,8 @@ npm run conformance:go     # sdk-go at the version in workers/go/go.mod (needs G
 SDK_GO_DIR=../sdk-go npm run conformance:go   # sdk-go from a local checkout
 CONFORMANCE_ONLY=reconnect,store npm run conformance   # a subset
 
-npm run build && npm run conformance:packed   # this SDK as published (require and import)
+npm run build && npm run conformance:packed   # this SDK as it would be published (require and import)
+CONFORMANCE_TS_VERSION=0.1.0 npm run conformance:registry   # a version installed from npm
 ```
 
 `conformance:go` builds the Go worker once per run. `SDK_GO_DIR` builds it

@@ -1,21 +1,61 @@
 name: Release
 
-# Publishes to npm when a GitHub release is published for a tag vX.Y.Z that
-# matches package.json. Uses npm trusted publishing: no token is stored, and
-# the package gets a provenance attestation. See RELEASING.md for the one-time
-# setup on npmjs.com.
+# Publishes @dibbla/sdk-ts when a new version reaches main.
+#
+# To release: bump "version" in package.json, add a CHANGELOG.md section, and
+# merge to main. This workflow sees that the version is not on npm yet, runs
+# the full checks, publishes with provenance, tags v<version>, creates the
+# GitHub release, and finally installs the published package from npm and
+# runs the conformance suite against it. A push that doesn't change the
+# version publishes nothing.
+#
+# Publishing uses npm trusted publishing (OIDC): no npm token exists anywhere.
+# The trust relationship is configured on the package; see RELEASING.md.
 
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
-  id-token: write # OIDC for npm trusted publishing and provenance
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  publish:
+  check:
+    name: Is this version new?
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - id: version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          if npm view "@dibbla/sdk-ts@${version}" version >/dev/null 2>&1; then
+            echo "@dibbla/sdk-ts@${version} is already published; nothing to release."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "@dibbla/sdk-ts@${version} is new; releasing."
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish:
+    name: Publish v${{ needs.check.outputs.version }}
+    needs: check
+    if: needs.check.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # tag and GitHub release
+      id-token: write # OIDC for npm trusted publishing and provenance
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -27,21 +67,49 @@ jobs:
         with:
           go-version-file: conformance/workers/go/go.mod
           cache-dependency-path: conformance/workers/go/go.sum
-      - name: Tag matches package.json
-        run: |
-          version="$(node -p "require('./package.json').version")"
-          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
-            echo "Release tag ${GITHUB_REF_NAME} does not match package.json version ${version}" >&2
-            exit 1
-          fi
-      - name: npm with trusted publishing support
+      - name: npm with trusted publishing
         run: npm install -g npm@^11.5.1
       - run: npm ci
       - run: npm run build
       - run: npm run typecheck
       - run: npm test
-      - name: Conformance (reference, and this package as published)
+      - name: Conformance (reference, and this package as it will be published)
         run: |
           npm run conformance:go
           npm run conformance:packed
       - run: npm publish --provenance --access public
+      - name: Tag and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          # The release notes are this version's CHANGELOG.md section.
+          awk -v v="## ${VERSION}" '$0 == v {on=1; next} /^## / {on=0} on' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "See CHANGELOG.md." > notes.md
+          gh release create "v${VERSION}" --target "${GITHUB_SHA}" --title "v${VERSION}" --notes-file notes.md
+
+  verify:
+    name: Verify the published package
+    needs: [check, publish]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Wait for the registry to serve it
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          for i in $(seq 1 30); do
+            npm view "@dibbla/sdk-ts@${VERSION}" version && exit 0
+            sleep 10
+          done
+          echo "@dibbla/sdk-ts@${VERSION} not readable after 5 minutes" >&2
+          exit 1
+      - name: Conformance against the package installed from npm
+        env:
+          CONFORMANCE_TS_VERSION: ${{ needs.check.outputs.version }}
+        run: npm run conformance:registry
