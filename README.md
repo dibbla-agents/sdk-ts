@@ -20,7 +20,7 @@ This SDK mirrors the Go SDK with idiomatic TypeScript patterns:
 ### Installation
 
 ```bash
-npm install @dibbla-agents/sdk-ts
+npm install @dibbla/sdk-ts
 ```
 
 The package ships CommonJS and ES modules with type declarations. Define
@@ -32,8 +32,8 @@ your functions' types, and `npm install zod` would give you Zod 4.
 Create a simple worker with custom functions:
 
 ```typescript
-import * as sdk from '@dibbla-agents/sdk-ts';
-import { z } from '@dibbla-agents/sdk-ts';
+import * as sdk from '@dibbla/sdk-ts';
+import { z } from '@dibbla/sdk-ts';
 
 // Define input/output schemas with Zod
 const GreetingInput = z.object({
@@ -317,8 +317,8 @@ This tutorial walks through building a function that reads data from Google Shee
 Start by defining the input and output schemas with Zod:
 
 ```typescript
-import * as sdk from '@dibbla-agents/sdk-ts';
-import { z } from '@dibbla-agents/sdk-ts';
+import * as sdk from '@dibbla/sdk-ts';
+import { z } from '@dibbla/sdk-ts';
 
 // Input: just the Google Sheets URL
 const ReadSheetsInput = z.object({
@@ -476,8 +476,8 @@ my-worker/
 Each module exports its function definitions:
 
 ```typescript
-import * as sdk from '@dibbla-agents/sdk-ts';
-import { z } from '@dibbla-agents/sdk-ts';
+import * as sdk from '@dibbla/sdk-ts';
+import { z } from '@dibbla/sdk-ts';
 
 const ReadSheetsInput = z.object({
   url: z.string(),
@@ -529,7 +529,7 @@ The entry point becomes remarkably concise:
 
 ```typescript
 import 'dotenv/config';
-import * as sdk from '@dibbla-agents/sdk-ts';
+import * as sdk from '@dibbla/sdk-ts';
 import * as functions from './functions';
 
 async function main() {

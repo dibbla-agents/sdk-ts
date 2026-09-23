@@ -5,7 +5,7 @@
  * 
  * @example
  * ```typescript
- * import * as sdk from '@dibbla-agents/sdk-ts';
+ * import * as sdk from '@dibbla/sdk-ts';
  * import { z } from 'zod';
  * 
  * const GreetingInput = z.object({ name: z.string() });

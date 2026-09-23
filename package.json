@@ -1,5 +1,5 @@
 {
-  "name": "@dibbla-agents/sdk-ts",
+  "name": "@dibbla/sdk-ts",
   "version": "0.1.0",
   "description": "Dibbla Agents SDK for TypeScript: workers that serve functions, jobs and capability providers to the Dibbla workflow engine",
   "main": "./dist/index.js",

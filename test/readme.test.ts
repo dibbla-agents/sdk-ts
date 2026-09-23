@@ -26,7 +26,7 @@ describe('README', () => {
 
   it('Quick Start runs as written and serves its function', { timeout: 30_000 }, async () => {
     // The only change: the package import points at this repository's source.
-    const source = snippetAfter('### Example Usage').replaceAll("'@dibbla-agents/sdk-ts'", JSON.stringify(path.join(REPO, 'src')));
+    const source = snippetAfter('### Example Usage').replaceAll("'@dibbla/sdk-ts'", JSON.stringify(path.join(REPO, 'src')));
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'readme-'));
     const file = path.join(dir, 'quickstart.ts');
     fs.writeFileSync(file, source);

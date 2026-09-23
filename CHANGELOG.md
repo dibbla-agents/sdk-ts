@@ -2,6 +2,10 @@
 
 ## 0.1.0
 
+**The package is now `@dibbla/sdk-ts`**, published by the `dibbla` npm
+organization. It replaces `@dibbla-agents/sdk-ts`; update the dependency and
+imports.
+
 The TypeScript SDK brought to parity with sdk-go v0.0.24 (DIB-1018). A
 cross-SDK conformance suite (`conformance/`) now pins the wire behaviour, and
 this release passes all of it.

@@ -79,8 +79,8 @@ class TsWorker implements WorkerLauncher {
     fs.writeFileSync(path.join(project, 'package.json'), '{"name":"conformance-packed","private":true}');
     await execFileAsync('npm', ['install', '--silent', '--no-audit', '--no-fund', tarball], { cwd: project });
     // Resolved from inside the project, so Node applies the package's exports map.
-    fs.writeFileSync(path.join(project, 'load.cjs'), "module.exports = require('@dibbla-agents/sdk-ts');\n");
-    fs.writeFileSync(path.join(project, 'load.mjs'), "export * from '@dibbla-agents/sdk-ts';\n");
+    fs.writeFileSync(path.join(project, 'load.cjs'), "module.exports = require('@dibbla/sdk-ts');\n");
+    fs.writeFileSync(path.join(project, 'load.mjs'), "export * from '@dibbla/sdk-ts';\n");
     this.loader = path.join(project, mode === 'packed-cjs' ? 'load.cjs' : 'load.mjs');
   }
 

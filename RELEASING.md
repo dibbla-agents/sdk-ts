@@ -5,16 +5,36 @@ release is published. Nobody publishes from a laptop.
 
 ## One-time setup
 
-On npmjs.com, a maintainer of `@dibbla-agents/sdk-ts` adds a trusted
-publisher under the package settings:
+The package is `@dibbla/sdk-ts`, owned by the `dibbla` npm organization. (It was
+`@dibbla-agents/sdk-ts` up to 0.0.1, which was published from a personal
+account and could not connect; see CHANGELOG.md.)
 
-- Publisher: GitHub Actions
-- Organization: `dibbla-agents`, repository: `sdk-ts`
-- Workflow: `release.yml`
+1. **First publish, by hand.** npm only lets you attach a trusted publisher
+   to a package that exists, so an owner of the `dibbla` org publishes 0.1.0
+   once, from a clean checkout of the release commit:
 
-With that in place the workflow publishes over OIDC. There is no npm token to
-store or rotate, and every version carries a provenance attestation linking it
-to the commit and workflow run that built it.
+   ```sh
+   npm ci && npm run build && npm test && npm run conformance:packed
+   npm publish --access public
+   ```
+
+2. **Add the trusted publisher.** On npmjs.com, under the package settings:
+   - Publisher: GitHub Actions
+   - Organization: `dibbla-agents`, repository: `sdk-ts`
+   - Workflow: `release.yml`
+
+   Then, in the same settings, require trusted publishing and disallow tokens,
+   so no one can publish from a laptop again.
+
+3. **Retire the old name.** An owner of `@dibbla-agents/sdk-ts` runs:
+
+   ```sh
+   npm deprecate @dibbla-agents/sdk-ts "Moved to @dibbla/sdk-ts; 0.0.1 cannot connect"
+   ```
+
+From then on the workflow publishes over OIDC. There is no npm token to store
+or rotate, and every version carries a provenance attestation linking it to
+the commit and workflow run that built it.
 
 ## Cutting a release
 

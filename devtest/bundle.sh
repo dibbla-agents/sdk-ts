@@ -8,7 +8,7 @@ out="${1:?usage: devtest/bundle.sh <out-dir>}"
 mkdir -p "$out"
 (cd "$repo" && npm run build >/dev/null)
 tarball="$(cd "$repo" && npm pack --silent --pack-destination "$out" | tail -1)"
-mv "$out/$tarball" "$out/dibbla-agents-sdk-ts.tgz"
+mv "$out/$tarball" "$out/dibbla-sdk-ts.tgz"
 cp "$repo/devtest/Dockerfile" "$repo/devtest/entry.ts" "$repo/devtest/REVIEW.md" "$repo/devtest/APP.md" "$out/"
 cp "$repo/conformance/workers/ts/worker.ts" "$out/worker.ts"
 printf '{"name":"sdk-ts-devtest","private":true}\n' > "$out/package.json"
