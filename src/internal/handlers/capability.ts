@@ -130,6 +130,7 @@ async function handleRequest(ctx: CapabilityContext, message: EventMessage): Pro
       if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('not a JSON object');
       request = parsed as Record<string, unknown>;
     } catch (err) {
+      log.debug(`Capability provider request with unusable payload (${state.correlationId}): ${errorMessage(err)}`);
       await sendCapabilityErrorResponse(ctx, state, `capability provider request payload is not valid JSON: ${errorMessage(err)}`);
       return;
     }
@@ -137,6 +138,7 @@ async function handleRequest(ctx: CapabilityContext, message: EventMessage): Pro
 
   const capability = typeof request.capability === 'string' ? request.capability : '';
   const provider = typeof request.provider === 'string' ? request.provider : '';
+  log.debug(`Capability provider request for ${JSON.stringify(capability)}/${JSON.stringify(provider)} (${state.correlationId})`);
   const invoke = ctx.capabilities.invoker(capability, provider);
   if (!invoke) {
     await sendCapabilityErrorResponse(
@@ -156,7 +158,11 @@ async function handleRequest(ctx: CapabilityContext, message: EventMessage): Pro
     return;
   }
   try {
-    await sendResponse(ctx, state, await invoke(request, controller.signal));
+    const response = await invoke(request, controller.signal);
+    log.debug(
+      `Capability provider ${capability}/${provider} ${typeof response.error === 'string' ? `failed: ${response.error}` : 'answered'} (${state.correlationId})`,
+    );
+    await sendResponse(ctx, state, response);
   } catch (err) {
     await sendCapabilityErrorResponse(ctx, state, errorMessage(err));
   } finally {

@@ -1,8 +1,9 @@
 /**
  * Minimal leveled logger for SDK internals.
  *
- * The level comes from DIBBLA_LOG_LEVEL (debug, info, warn, error, silent) and
- * defaults to info. Nothing logged at info or above contains payloads: those
+ * The level comes from SDK_LOG_LEVEL (debug, info, warn, error, silent) and
+ * defaults to info. Not DIBBLA_*: the Dibbla platform reserves that prefix and
+ * drops user variables that use it. Nothing logged at info or above contains payloads: those
  * carry end-user data, and a worker's logs are not the place for it.
  */
 
@@ -15,7 +16,7 @@ function parseLevel(value: string | undefined): LogLevel | undefined {
   return v && v in ORDER ? (v as LogLevel) : undefined;
 }
 
-let current: LogLevel = parseLevel(process.env.DIBBLA_LOG_LEVEL) ?? 'info';
+let current: LogLevel = parseLevel(process.env.SDK_LOG_LEVEL) ?? 'info';
 
 export function setLogLevel(level: LogLevel): void {
   current = level;

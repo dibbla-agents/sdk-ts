@@ -23,7 +23,7 @@ the worker retried forever. The definition is now built in.
   `server.registerCapabilityProvider`.
 - **Verified caller.** Simple handlers receive `{ caller, signal, event }`;
   `callerFromEvent(event)` for advanced handlers.
-- `server.stop()`, `setLogLevel` / `DIBBLA_LOG_LEVEL`, HTTP/2 keepalive
+- `server.stop()`, `setLogLevel` / `SDK_LOG_LEVEL`, HTTP/2 keepalive
   settings (`GRPC_KEEPALIVE_TIME_SEC`, `GRPC_KEEPALIVE_TIMEOUT_SEC`),
   `GRPC_TLS_INSECURE_SKIP_VERIFY`.
 - `{ timeoutMs, signal }` on store, cache, OAuth and RPC requests;

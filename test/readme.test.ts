@@ -38,7 +38,7 @@ describe('README', () => {
 
     const child = spawn(process.execPath, ['--import', require.resolve('tsx'), file], {
       cwd: dir,
-      env: { PATH: process.env.PATH ?? '', GRPC_SERVER_ADDRESS: `127.0.0.1:${server.port}`, SERVER_API_TOKEN: 'readme-token', DIBBLA_LOG_LEVEL: 'warn' },
+      env: { PATH: process.env.PATH ?? '', GRPC_SERVER_ADDRESS: `127.0.0.1:${server.port}`, SERVER_API_TOKEN: 'readme-token', SDK_LOG_LEVEL: 'warn' },
       stdio: 'pipe',
     });
     let output = '';

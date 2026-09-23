@@ -93,7 +93,7 @@ main().catch(console.error);
 | `GRPC_TLS_INSECURE_SKIP_VERIFY` | `false`               | Skip server certificate verification (insecure; self-signed servers only)   |
 | `GRPC_KEEPALIVE_TIME_SEC`       | `300`                 | HTTP/2 keepalive ping interval; see [Connection](#robust-connection-management) |
 | `GRPC_KEEPALIVE_TIMEOUT_SEC`    | `20`                  | HTTP/2 keepalive ack timeout                                                |
-| `DIBBLA_LOG_LEVEL`              | `info`                | SDK log level: `debug`, `info`, `warn`, `error` or `silent`                 |
+| `SDK_LOG_LEVEL`              | `info`                | SDK log level: `debug`, `info`, `warn`, `error` or `silent`                 |
 
 ### Authentication
 
@@ -793,7 +793,7 @@ const fn = sdk.newSimpleFunction({
 
 ### Debug Mode
 
-Set `DIBBLA_LOG_LEVEL=debug` to log every event sent and received. Payloads are
+Set `SDK_LOG_LEVEL=debug` to log every event sent and received. Payloads are
 never logged: they carry end-user data.
 
 ## License
