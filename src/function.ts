@@ -33,8 +33,9 @@ function coerceToSchema(data: unknown, schema: ZodTypeAny): unknown {
     return coerceToSchema(data, innerSchema);
   }
 
-  // Coerce string to number
+  // Coerce string to number. A blank string is not a number (Number('') is 0).
   if (typeName === 'ZodNumber' && typeof data === 'string') {
+    if (data.trim() === '') return data;
     const num = Number(data);
     return isNaN(num) ? data : num;
   }
@@ -46,13 +47,29 @@ function coerceToSchema(data: unknown, schema: ZodTypeAny): unknown {
     return data;
   }
 
-  // Coerce string to bigint
-  if (typeName === 'ZodBigInt' && typeof data === 'string') {
+  // Coerce to bigint: published as Go int64, so callers send JSON numbers.
+  if (typeName === 'ZodBigInt' && (typeof data === 'string' || (typeof data === 'number' && Number.isInteger(data)))) {
     try {
       return BigInt(data);
     } catch {
       return data;
     }
+  }
+
+  // Coerce to Date: published as time.Time, which travels as an RFC 3339 string.
+  if (typeName === 'ZodDate' && typeof data === 'string') {
+    const date = new Date(data);
+    return isNaN(date.getTime()) ? data : date;
+  }
+
+  // Sets and maps are published as Go slices and maps: JSON arrays and objects.
+  if (typeName === 'ZodSet' && Array.isArray(data)) {
+    const valueType = (schema._def as { valueType: ZodTypeAny }).valueType;
+    return new Set(data.map((item) => coerceToSchema(item, valueType)));
+  }
+  if (typeName === 'ZodMap' && typeof data === 'object' && !Array.isArray(data)) {
+    const valueType = (schema._def as { valueType: ZodTypeAny }).valueType;
+    return new Map(Object.entries(data as Record<string, unknown>).map(([k, v]) => [k, coerceToSchema(v, valueType)]));
   }
 
   // Recurse into objects
@@ -270,6 +287,18 @@ class ExecutionError extends Error {}
 
 const NEVER_ABORTS = new AbortController().signal;
 
+/**
+ * JSON for handler output, with the types Zod allows but JSON lacks encoded
+ * the way their published Go types are: bigint as a number, Set as an array,
+ * Map as an object. (Date already encodes as an RFC 3339 string.)
+ */
+function encodeOutput(_key: string, value: unknown): unknown {
+  if (typeof value === 'bigint') return Number(value);
+  if (value instanceof Set) return Array.from(value);
+  if (value instanceof Map) return Object.fromEntries(value);
+  return value;
+}
+
 function describeZodError(err: z.ZodError): string {
   return err.issues.map((i) => (i.path.length ? `${i.path.join('.')}: ${i.message}` : i.message)).join('; ');
 }
@@ -351,6 +380,14 @@ class WorkerFunctionImpl<TInput, TOutput> implements WorkerFunction<TInput, TOut
         return null;
       });
       if (cached && cached.length > 0) {
+        // Like sdk-go, a cached value must decode as the output type.
+        let valid = false;
+        try {
+          valid = this.outputSchema.safeParse(coerceToSchema(JSON.parse(cached.toString('utf8')), this.outputSchema)).success;
+        } catch {
+          valid = false;
+        }
+        if (!valid) throw new ExecutionError('failed to unmarshal cached result');
         log.debug(`Cache HIT [${this.name}:${this.version}] Key: ${cacheKey}`);
         return cached;
       }
@@ -389,7 +426,7 @@ class WorkerFunctionImpl<TInput, TOutput> implements WorkerFunction<TInput, TOut
 
     let result: Buffer;
     try {
-      result = Buffer.from(JSON.stringify(output) ?? 'null');
+      result = Buffer.from(JSON.stringify(output, encodeOutput) ?? 'null');
     } catch (err) {
       throw new ExecutionError(`failed to marshal output: ${(err as Error).message}`);
     }

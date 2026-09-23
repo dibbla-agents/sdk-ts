@@ -46,12 +46,11 @@ export class CorrelationRouter {
       };
 
       this.waiters.set(correlationId, (message) => finish(() => resolve(message)));
-      if (timeoutMs > 0) {
-        timer = setTimeout(
-          () => finish(() => reject(new TimeoutError(`timed out after ${timeoutMs}ms waiting for ${awaiting}`))),
-          timeoutMs,
-        );
-      }
+      // As with a Go context deadline, a timeout of 0 or less expires at once.
+      timer = setTimeout(
+        () => finish(() => reject(new TimeoutError(`timed out after ${timeoutMs}ms waiting for ${awaiting}`))),
+        Math.max(0, timeoutMs),
+      );
       signal?.addEventListener('abort', onAbort, { once: true });
       send().catch((err) => finish(() => reject(err)));
     });

@@ -103,13 +103,43 @@ function goType(t: ZodTypeAny, side: Side): string {
     case 'ZodMap':
       return `map[${goType(d.keyType, side)}]${goType(d.valueType, side)}`;
     default:
-      // any, unknown, unions, intersections, null, undefined, ...
-      return 'interface {}';
+      // Object-shaped unions and intersections are objects; other unions,
+      // any, unknown, null, undefined, ... have no Go equivalent.
+      return objectParts(t, side) ? 'object' : 'interface {}';
+  }
+}
+
+/** The object shapes a type combines into one object, or null if it is not one. */
+function objectParts(t: ZodTypeAny, side: Side): ZodTypeAny[] | null {
+  t = unwrap(t, side);
+  const d = def(t);
+  switch (d.typeName) {
+    case 'ZodObject':
+      return [t];
+    case 'ZodIntersection': {
+      const left = objectParts(d.left, side);
+      const right = objectParts(d.right, side);
+      return left && right ? [...left, ...right] : null;
+    }
+    case 'ZodUnion':
+    case 'ZodDiscriminatedUnion': {
+      // Go has no unions; publish every field any option can carry.
+      const options = (d.typeName === 'ZodUnion' ? d.options : Array.from(d.options.values ? d.options.values() : d.options)) as ZodTypeAny[];
+      const parts = options.map((o) => objectParts(o, side));
+      return parts.every((p) => p !== null) ? parts.flat() as ZodTypeAny[] : null;
+    }
+    default:
+      return null;
   }
 }
 
 function buildSchema(t: ZodTypeAny, path: string, result: Record<string, string>, side: Side): void {
   t = unwrap(t, side);
+  const parts = def(t).typeName === 'ZodObject' ? null : objectParts(t, side);
+  if (parts) {
+    for (const part of parts) buildSchema(part, path, result, side);
+    return;
+  }
   if (def(t).typeName === 'ZodObject') {
     const shape = def(t).shape() as Record<string, ZodTypeAny>;
     for (const [name, field] of Object.entries(shape)) {
@@ -122,10 +152,11 @@ function buildSchema(t: ZodTypeAny, path: string, result: Record<string, string>
 
 function processField(t: ZodTypeAny, path: string, result: Record<string, string>, side: Side): void {
   t = unwrap(t, side);
+  if (objectParts(t, side)) {
+    buildSchema(t, path, result, side);
+    return;
+  }
   switch (def(t).typeName) {
-    case 'ZodObject':
-      buildSchema(t, path, result, side);
-      return;
     case 'ZodArray':
     case 'ZodSet':
       processArrayField(t, path, result, side);
@@ -150,10 +181,11 @@ function processArrayField(t: ZodTypeAny, path: string, result: Record<string, s
   const d = def(t);
   const element = unwrap(d.typeName === 'ZodSet' ? d.valueType : d.type, side);
   const elementPath = `${path}[]`;
+  if (objectParts(element, side)) {
+    buildSchema(element, elementPath, result, side);
+    return;
+  }
   switch (def(element).typeName) {
-    case 'ZodObject':
-      buildSchema(element, elementPath, result, side);
-      break;
     case 'ZodArray':
     case 'ZodSet':
       processArrayField(element, elementPath, result, side);

@@ -288,6 +288,42 @@ describe('GrpcCommunicator', () => {
     assert.ok(Date.now() - started < 2000, `close() took ${Date.now() - started}ms`);
   });
 
+  it('never counts an unreachable server as connected', async () => {
+    let reconnects = 0;
+    // Nothing listens on port 1.
+    const comm = new GrpcCommunicator({ serverAddress: '127.0.0.1:1', serverName: 's', reconnectIntervalSec: 0.2 });
+    cleanups.push(() => comm.close());
+    comm.setOnReconnect(() => reconnects++);
+    comm.connect();
+    await assert.rejects(comm.waitForConnection(1500), /connection timeout/);
+    assert.equal(comm.isConnected(), false);
+    assert.equal(reconnects, 0);
+    await assert.rejects(comm.sendEvent(event('x')), NotConnectedError);
+  });
+
+  it('rejects waitForConnection when closed', async () => {
+    const comm = new GrpcCommunicator({ serverAddress: '127.0.0.1:1', serverName: 's' });
+    comm.connect();
+    const waiting = comm.waitForConnection(30_000);
+    await comm.close();
+    await assert.rejects(waiting, /closed/);
+  });
+
+  it('settles every pending send when the stream dies under backpressure', async () => {
+    const server = await startServer();
+    const comm = communicator(server);
+    comm.connect();
+    const s = await server.streams.shift(5000);
+    assert.ok(s);
+    await comm.waitForConnection(5000);
+    const big = { ...event('big'), payload: Buffer.alloc(1024 * 1024, 1) };
+    const sends = Array.from({ length: 40 }, () => comm.sendEvent(big).then(() => 'sent', () => 'failed'));
+    s.end(grpc.status.UNAVAILABLE, 'gone');
+    const outcomes = await Promise.race([Promise.all(sends), sleep(5000).then(() => null)]);
+    assert.ok(outcomes, 'some sends never settled');
+    assert.ok(outcomes.includes('failed'));
+  });
+
   it('pings on the configured interval', async () => {
     const server = await startServer();
     const comm = communicator(server, { pingIntervalSec: 0.3 });

@@ -132,3 +132,11 @@ describe('service clients', () => {
     assert.deepEqual([req.function, req.server, req.node, req.workflow, req.run, req.meta], ['echo', 'other', 'n', 'wf', 'r', { calling_server: 'engine' }]);
   });
 });
+
+describe('correlation router: zero timeout', () => {
+  it('expires at once, like a Go context with a zero deadline', async () => {
+    const r = new CorrelationRouter();
+    await assert.rejects(r.request('a', () => Promise.resolve(), 'x', { timeoutMs: 0 }), TimeoutError);
+    assert.equal(r.pending, 0);
+  });
+});

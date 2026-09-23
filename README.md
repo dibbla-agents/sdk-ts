@@ -228,6 +228,10 @@ serves one organization, reject calls whose `orgId` is not yours.
   elements of object arrays.
 - Runtime validation of inputs and outputs. Keys not in the output schema are
   dropped before the response is sent.
+- `z.bigint()`, `z.date()`, `z.set()` and `z.map()` work on both sides: they
+  arrive as JSON numbers, RFC 3339 strings, arrays and objects, and are sent
+  back the same way. Integers beyond 2^53 lose precision in JSON parsing, as
+  in any JavaScript; send such ids as strings.
 - Full TypeScript type inference
 
 ### Built-in Caching

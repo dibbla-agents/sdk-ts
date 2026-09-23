@@ -118,3 +118,16 @@ describe('flattened type schema', () => {
     assert.deepEqual(zodToFlattenedSchema(z.array(z.number())), { type: '[]float64' });
   });
 });
+
+describe('flattened type schema: combined objects', () => {
+  it('publishes the fields of intersections and object unions, not a single "type" slot', () => {
+    const both = z.object({ a: z.string() }).and(z.object({ b: z.number().int() }));
+    assert.deepEqual(zodToFlattenedSchema(both), { a: 'string', b: 'int' });
+    const either = z.union([z.object({ a: z.string() }), z.object({ c: z.boolean() })]);
+    assert.deepEqual(zodToFlattenedSchema(either), { a: 'string', c: 'bool' });
+    const tagged = z.discriminatedUnion('kind', [z.object({ kind: z.literal('x'), x: z.string() }), z.object({ kind: z.literal('y'), y: z.string() })]);
+    assert.deepEqual(zodToFlattenedSchema(tagged), { kind: 'string', x: 'string', y: 'string' });
+    assert.deepEqual(zodToFlattenedSchema(z.object({ list: z.array(both) })), { list: '[]object', 'list[].a': 'string', 'list[].b': 'int' });
+    assert.deepEqual(zodToFlattenedSchema(z.object({ v: z.union([z.string(), z.number()]) })), { v: 'interface {}' });
+  });
+});

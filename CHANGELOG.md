@@ -52,6 +52,13 @@ the worker retried forever. The definition is now built in.
   errors instead of `false`.
 - `start()` rejects if no connection is made within 30 seconds (it used to
   continue unconnected), and resolves when `stop()` is called.
+- A worker only counts as connected once the transport is up, so `start()`
+  fails against an unreachable server instead of reporting success. Sends
+  pending when a connection dies now fail instead of hanging.
+- Schemas of intersections and object unions publish their fields.
+  `bigint`, `date`, `set` and `map` fields decode from and encode to JSON.
+  A cached value must match the output schema. A blank string is no longer
+  read as 0. A timeout of 0 expires at once.
 - Payloads are no longer written to the log.
 - Requires Node.js 20 or later.
 - Deep imports into `dist/` are no longer possible; import from the package root.

@@ -128,3 +128,30 @@ describe('function execution', () => {
     });
   });
 });
+
+describe('function execution: types JSON lacks', () => {
+  const roundTrip = async <T>(schema: z.ZodType<T>, payload: unknown, handler: (i: T) => T = (i) => i) => {
+    const fn = newSimpleFunction({ name: 'rt', version: '1', description: '', input: z.object({ v: schema }), output: z.object({ v: schema }), handler: (i) => ({ v: handler(i.v as T) }) });
+    return JSON.parse((await fn.execute(json({ v: payload }), event(), state)).toString()).v;
+  };
+
+  it('decodes and encodes the types published as Go int64, time.Time, slices and maps', async () => {
+    assert.equal(await roundTrip(z.bigint(), 42), 42);
+    assert.equal(await roundTrip(z.date(), '2026-09-20T10:00:00.000Z'), '2026-09-20T10:00:00.000Z');
+    assert.deepEqual(await roundTrip(z.set(z.string()), ['a', 'b']), ['a', 'b']);
+    assert.deepEqual(await roundTrip(z.map(z.string(), z.number()), { a: 1 }), { a: 1 });
+  });
+
+  it('does not read a blank string as the number 0', async () => {
+    await assert.rejects(roundTrip(z.number(), ''), /failed to unmarshal input/);
+    await assert.rejects(roundTrip(z.number(), '  '), /failed to unmarshal input/);
+    assert.equal(await roundTrip(z.number(), '3'), 3);
+  });
+
+  it('refuses a cached value that does not decode as the output type', async () => {
+    const fn = newFunction({ name: 'c', version: '1', description: '', input: Text, output: Text, handler: (i) => i, cacheTTLMs: 1000 });
+    const payload = json({ text: 'a' });
+    fn.setCache({ get: async () => Buffer.from('{"text":5}'), set: async () => undefined, setWithTTL: async () => undefined });
+    await assert.rejects(fn.execute(payload, event(), state), /failed to unmarshal cached result/);
+  });
+});

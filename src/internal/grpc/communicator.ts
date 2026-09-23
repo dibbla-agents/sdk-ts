@@ -90,6 +90,8 @@ class Connection {
   readonly dead: Promise<Error | undefined>;
   isDead = false;
   pingTimer: NodeJS.Timeout | undefined;
+  /** Writes not yet flushed; rejected when the connection dies. */
+  readonly pendingWrites = new Set<(err: Error) => void>();
 
   constructor(
     readonly client: grpc.Client,
@@ -104,6 +106,9 @@ class Connection {
     this.isDead = true;
     this.cause = cause;
     this.settle(cause);
+    const lost = new Error(`connection lost${cause ? `: ${cause.message}` : ''}`);
+    for (const reject of this.pendingWrites) reject(lost);
+    this.pendingWrites.clear();
   }
 
   teardown(): void {
@@ -122,11 +127,28 @@ class Connection {
   }
 }
 
-function write(stream: EventStream, message: GrpcEventMessage): Promise<void> {
+/**
+ * Writes one message, settling when it is flushed or when the connection
+ * dies. grpc-js drops the callbacks of writes still buffered when a call
+ * ends, so waiting for the callback alone could hang a sender forever.
+ */
+function write(conn: Connection, message: GrpcEventMessage): Promise<void> {
   return new Promise((resolve, reject) => {
-    stream.write(message, (err: Error | null | undefined) => (err ? reject(err) : resolve()));
+    if (conn.isDead) {
+      reject(new NotConnectedError());
+      return;
+    }
+    conn.pendingWrites.add(reject);
+    conn.stream.write(message, (err: Error | null | undefined) => {
+      conn.pendingWrites.delete(reject);
+      if (err) reject(err);
+      else resolve();
+    });
   });
 }
+
+/** How long one attempt may wait for the channel to become ready. */
+const CONNECT_TIMEOUT_MS = 20_000;
 
 /**
  * The bidirectional event stream to the workflow server.
@@ -163,6 +185,8 @@ export class GrpcCommunicator {
   private everConnected = false;
   private resolveFirstConnection!: () => void;
   private readonly firstConnection: Promise<void>;
+  private resolveClosed!: () => void;
+  private readonly closedSignal: Promise<void>;
 
   private messageHandler: ((message: EventMessage) => void) | null = null;
   private pending: EventMessage[] = [];
@@ -186,6 +210,7 @@ export class GrpcCommunicator {
     this.maxBackoffMs = options.maxBackoffMs ?? DEFAULT_MAX_BACKOFF_MS;
     this.healthyResetAfterMs = options.healthyResetAfterMs ?? DEFAULT_HEALTHY_RESET_AFTER_MS;
     this.firstConnection = new Promise((resolve) => (this.resolveFirstConnection = resolve));
+    this.closedSignal = new Promise((resolve) => (this.resolveClosed = resolve));
   }
 
   /** Starts the connection supervisor in the background. */
@@ -198,13 +223,17 @@ export class GrpcCommunicator {
     );
   }
 
-  /** Resolves on the first successful connection; rejects after timeoutMs. */
+  /** Resolves on the first successful connection; rejects after timeoutMs or on close(). */
   waitForConnection(timeoutMs: number): Promise<void> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`connection timeout after ${timeoutMs}ms`)), timeoutMs);
       this.firstConnection.then(() => {
         clearTimeout(timer);
         resolve();
+      });
+      this.closedSignal.then(() => {
+        clearTimeout(timer);
+        reject(new Error('communicator closed'));
       });
     });
   }
@@ -233,7 +262,7 @@ export class GrpcCommunicator {
     const conn = this.conn;
     if (!conn || conn.isDead) throw new NotConnectedError();
     try {
-      await write(conn.stream, toGrpc(event));
+      await write(conn, toGrpc(event));
     } catch (err) {
       log.warn(`Failed to send event via gRPC: ${errorMessage(err)}`);
       conn.kill(new Error(`send failed: ${errorMessage(err)}`));
@@ -245,6 +274,7 @@ export class GrpcCommunicator {
   /** Stops reconnecting and tears down the current connection. */
   async close(): Promise<void> {
     this.closed = true;
+    this.resolveClosed();
     this.conn?.kill();
     this.connecting?.teardown();
     this.wakeSleeper?.();
@@ -392,6 +422,33 @@ export class GrpcCommunicator {
     };
   }
 
+  /**
+   * Resolves once the channel is READY. Rejects on TRANSIENT_FAILURE, after
+   * CONNECT_TIMEOUT_MS, or on close(). Polls in short slices because a
+   * grpc-js connectivity watch cannot be cancelled.
+   */
+  private waitReady(client: grpc.Client): Promise<void> {
+    const channel = client.getChannel();
+    const deadline = Date.now() + CONNECT_TIMEOUT_MS;
+    return new Promise((resolve, reject) => {
+      const check = () => {
+        if (this.closed) return reject(new Error('communicator closed'));
+        let state: grpc.connectivityState;
+        try {
+          state = channel.getConnectivityState(true);
+        } catch (err) {
+          return reject(err);
+        }
+        if (state === grpc.connectivityState.READY) return resolve();
+        if (state === grpc.connectivityState.TRANSIENT_FAILURE) return reject(new Error('UNAVAILABLE: connection failed'));
+        if (state === grpc.connectivityState.SHUTDOWN) return reject(new Error('channel shut down'));
+        if (Date.now() >= deadline) return reject(new Error('failed to connect before the deadline'));
+        channel.watchConnectivityState(state, Math.min(deadline, Date.now() + 250), () => check());
+      };
+      check();
+    });
+  }
+
   private async attemptConnection(): Promise<Connection | null> {
     log.info(`Attempting to connect to gRPC server at ${this.serverAddress}...`);
 
@@ -405,11 +462,21 @@ export class GrpcCommunicator {
     }
     if (this.closed) return null;
 
-    // Like grpc-go's lazy client: the stream opens at once and the first
-    // write waits for the transport, failing fast (UNAVAILABLE) if the
-    // server cannot be reached.
+    // Like grpc-go's fail-fast stream open: wait for the transport, and give
+    // up as soon as the channel reports it cannot connect.
     const Service = eventService();
     const client = new Service(this.serverAddress, this.credentials(), this.channelOptions());
+    try {
+      await this.waitReady(client);
+    } catch (err) {
+      client.close();
+      if (!this.closed) log.error(`Failed to connect to gRPC server at ${this.serverAddress}: ${errorMessage(err)}`);
+      return null;
+    }
+    if (this.closed) {
+      client.close();
+      return null;
+    }
 
     const metadata = new grpc.Metadata();
     if (token) metadata.set('authorization', `Bearer ${token}`);
@@ -429,7 +496,7 @@ export class GrpcCommunicator {
 
     this.connecting = conn;
     try {
-      await write(stream, {
+      await write(conn, {
         server: this.serverName,
         event: Events.ClientRegistration,
         text: 'Client registration',
