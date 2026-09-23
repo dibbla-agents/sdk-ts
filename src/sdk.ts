@@ -17,7 +17,9 @@ import {
   EventState,
   HandlerContext,
 } from './internal/handlers/handlers';
+import { announceJobs, registerJobHandlers } from './internal/handlers/jobs';
 import { WorkerFunction, GlobalState, FunctionCache } from './function';
+import { JobHandler } from './jobs/types';
 import { functionKey } from './types/keys';
 
 // Load environment variables
@@ -41,6 +43,7 @@ export class Server {
   private functions: Map<string, WorkerFunction<any, any>> = new Map();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private pendingFunctions: WorkerFunction<any, any>[] = [];
+  private jobs: JobHandler[] = [];
   private started = false;
   private resolveStopped: (() => void) | null = null;
 
@@ -80,6 +83,17 @@ export class Server {
   }
 
   /**
+   * Register a job the workflow server can trigger. Must be called before
+   * start(); jobs are announced on connect and after every reconnect.
+   */
+  registerJob(job: JobHandler): void {
+    if (this.started) throw new Error('registerJob must be called before start()');
+    if (!job.id) throw new Error('job id must not be empty');
+    if (this.jobs.some((j) => j.id === job.id)) throw new Error(`job ${job.id} is already registered`);
+    this.jobs.push(job);
+  }
+
+  /**
    * Start the server and connect to the workflow server.
    * Resolves when stop() is called; rejects if no connection can be made
    * within 30 seconds.
@@ -108,8 +122,10 @@ export class Server {
 
     await this.registerServer();
     await this.sendStartupBroadcast();
+    await this.registerJobs();
 
     registerHandlers(this.handlerContext);
+    registerJobHandlers({ ...this.handlerContext, jobs: this.jobs });
     startMessageListener(this.handlerContext);
     log.info('Stream listeners activated, server running...');
     this.started = true;
@@ -222,6 +238,7 @@ export class Server {
     log.info('Connection re-established, re-registering with workflow server...');
     await this.registerServer();
     await this.sendStartupBroadcast();
+    await this.registerJobs();
     log.info('Re-registration complete');
   }
 
@@ -256,6 +273,10 @@ export class Server {
   private async registerServer(): Promise<void> {
     await this.announce(startupEventState(this.config.serverName));
     log.info(`Server '${this.config.serverName}' registered with workflow server`);
+  }
+
+  private async registerJobs(): Promise<void> {
+    await announceJobs({ serverName: this.config.serverName, communicator: this.communicator!, jobs: this.jobs });
   }
 
   private async sendStartupBroadcast(): Promise<void> {

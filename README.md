@@ -551,6 +551,50 @@ main().catch(console.error);
 
 ---
 
+### Jobs
+
+Jobs are long-running work the platform triggers, such as pipeline tasks.
+Unlike functions they report progress while they run:
+
+```typescript
+server.registerJob(
+  sdk.newJob({
+    id: 'sync_contacts',
+    name: 'Sync contacts',
+    parameters: [
+      { name: 'limit', type: 'int', required: true },
+      { name: 'source', type: 'string', required: false, default: 'crm' },
+    ],
+    async execute(ctx) {
+      const limit = ctx.getIntArg('limit', 100);
+      ctx.logger.info(`syncing up to ${limit} contacts`);
+
+      ctx.logger.taskStarted('fetch');
+      for (let i = 1; i <= limit; i++) {
+        // ...
+        ctx.logger.progress(i, limit, 'fetching');
+      }
+      ctx.logger.taskCompleted();
+      // Throwing fails the run with the error's message.
+    },
+  }),
+);
+```
+
+Jobs are announced on connect and again after every reconnect. The logger
+sends `log_message`, `task_*` and `progress_update` events for the run, and the
+SDK sends `job_started`, `job_completed` or `job_failed` around `execute`.
+
+When a job calls a workflow, stamp the request with `sdk.originHeaders(ctx)`.
+That ties the resulting run to the current pipeline task, so the platform can
+show which task made which calls:
+
+```typescript
+ctx.logger.taskStarted('GenerateSentiment');
+const origin = sdk.originHeaders(ctx); // once per task, after taskStarted
+await fetch(workflowUrl, { method: 'POST', headers: { ...origin, 'Content-Type': 'application/json' }, body });
+```
+
 ### Status Messages
 
 Send real-time status updates to the workflow UI during function execution. This is useful for long-running tasks to provide progress feedback to users.

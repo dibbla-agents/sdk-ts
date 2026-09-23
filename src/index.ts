@@ -60,6 +60,25 @@ export {
   z,
 } from './function';
 
+// Jobs
+export {
+  JobStatus,
+  JobParameter,
+  JobHandler,
+  JobOptions,
+  JobEventMeta,
+  JobContext,
+  JobLogger,
+  newJob,
+  generateRunId,
+  generateJobRunId,
+  originHeaders,
+  ORIGIN_KIND_HEADER,
+  ORIGIN_ID_HEADER,
+  ORIGIN_LABEL_HEADER,
+  ORIGIN_KIND_PIPELINE_TASK,
+} from './jobs';
+
 // Verified caller identity
 export { Caller, callerFromEvent, IDENTITY_USER_AUTHENTICATED, MetaKeys } from './caller';
 

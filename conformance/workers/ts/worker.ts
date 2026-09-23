@@ -127,8 +127,35 @@ server.registerFunctions([
   }),
 ]);
 
-// Not expressible in this SDK version yet: the five capability providers and
-// count_job.
+server.registerJob(
+  sdk.newJob({
+    id: 'count_job',
+    name: 'Count Job',
+    parameters: [
+      { name: 'limit', type: 'int', required: true },
+      { name: 'label', type: 'string', required: false, default: 'items' },
+    ],
+    execute: (ctx) => {
+      const limit = ctx.getIntArg('limit', 0);
+      const label = ctx.getStringArg('label', 'items');
+
+      ctx.logger.info('starting');
+      if (ctx.getBoolArg('fail', false)) {
+        ctx.logger.error('failing');
+        throw new Error('count failed');
+      }
+
+      ctx.logger.taskStarted('count');
+      for (let i = 1; i <= limit; i++) {
+        ctx.logger.progress(i, limit, `counting ${label}`);
+      }
+      ctx.logger.taskCompleted();
+      ctx.logger.warn('done');
+    },
+  }),
+);
+
+// Not expressible in this SDK version yet: the five capability providers.
 
 server.start().catch((err) => {
   console.error(err);
