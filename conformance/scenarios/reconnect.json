@@ -1,0 +1,14 @@
+{
+  "name": "reconnect",
+  "description": "When the stream dies with a retryable status the worker reconnects on its own and registers everything again on the new stream (DIB-176).",
+  "steps": [
+    { "accept": { "metadata": { "authorization": "Bearer ${token}" } } },
+    { "include": "handshake" },
+    { "end_stream": { "code": "UNAVAILABLE", "details": "server going away" } },
+    { "comment": "First retry is the initial interval (5s) with jitter to [2.5s, 5s]." },
+    { "accept": { "metadata": { "authorization": "Bearer ${token}" } }, "timeout_ms": 15000 },
+    { "include": "handshake" },
+    { "send": { "event": "request_server_name", "correlation_id": "after-reconnect" } },
+    { "expect": { "server": "${worker}", "event": "response_server_name", "text": "${worker}", "correlation_id": "after-reconnect" } }
+  ]
+}

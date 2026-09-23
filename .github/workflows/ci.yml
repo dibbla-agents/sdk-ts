@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+      - name: Conformance (TypeScript worker)
+        run: npm run conformance
+
+  package:
+    # The package as users install it: packed, installed into a scratch
+    # project, and loaded through require and through import.
+    name: Packaged SDK (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run conformance:packed
+
+  conformance-go:
+    # The fixtures describe sdk-go. If the Go worker fails a scenario, the
+    # scenario is wrong — this job keeps them honest.
+    name: Conformance (Go worker, reference)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: conformance/workers/go/go.mod
+          cache-dependency-path: conformance/workers/go/go.sum
+      - run: npm ci
+      - run: npm run conformance:go

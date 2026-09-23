@@ -1,5 +1,5 @@
 import { EventMessage, Events } from '../../types/events';
-import { CorrelationRouter } from '../correlation/router';
+import { CorrelationRouter, RequestOptions } from '../correlation/router';
 import { uid } from '../utils/uid';
 import { WorkflowCommunicator } from '../cache/cache-client';
 
@@ -19,37 +19,22 @@ export interface ExecutionNode {
 }
 
 /**
- * RpcClient provides RPC-style function calls over the workflow gRPC stream.
+ * Status messages and calls to other functions, over the workflow stream.
  */
 export class RpcClient {
-  private communicator: WorkflowCommunicator;
-  private router: CorrelationRouter;
-  private serverName: string;
+  private readonly router = new CorrelationRouter();
 
-  constructor(communicator: WorkflowCommunicator, serverName: string) {
-    this.communicator = communicator;
-    this.serverName = serverName;
-    this.router = new CorrelationRouter();
-  }
+  constructor(
+    private readonly communicator: WorkflowCommunicator,
+    private readonly serverName: string,
+  ) {}
 
   /**
-   * Send a status event with the given text and optional payload.
+   * Sends a status update for the invocation eventState describes, with an
+   * optional JSON payload.
    */
-  async sendStatusEvent(
-    eventState: EventMessage,
-    text: string,
-    payload?: unknown
-  ): Promise<void> {
-    if (!this.communicator.isConnected()) {
-      throw new Error('rpc: no communicator connected');
-    }
-
-    let payloadBuffer: Buffer | null = null;
-    if (payload !== undefined) {
-      payloadBuffer = Buffer.from(JSON.stringify(payload));
-    }
-
-    const event: EventMessage = {
+  async sendStatusEvent(eventState: EventMessage, text: string, payload?: unknown): Promise<void> {
+    await this.communicator.sendEvent({
       function: eventState.function,
       node: eventState.node,
       workflow: eventState.workflow,
@@ -59,95 +44,58 @@ export class RpcClient {
       text,
       run: eventState.run,
       meta: null,
-      payload: payloadBuffer,
+      payload: payload === undefined ? null : Buffer.from(JSON.stringify(payload)),
       correlationId: eventState.correlationId,
-    };
-
-    await this.communicator.sendEvent(event);
+    });
   }
 
   /**
-   * Call a remote function and wait for the response.
+   * Invokes the function (or, for a "flow_tool" node, the flow) an execution
+   * node names, and resolves with the raw response payload.
    */
-  async call(
-    timeoutMinutes: number,
-    executionNode: ExecutionNode,
-    eventState: EventMessage,
-    payload: unknown
-  ): Promise<Buffer> {
-    if (!this.communicator.isConnected()) {
-      throw new Error('rpc: no communicator connected');
-    }
-
+  async call(timeoutMinutes: number, executionNode: ExecutionNode, eventState: EventMessage, payload: unknown, options: { signal?: AbortSignal } = {}): Promise<Buffer> {
+    const body = Buffer.from(JSON.stringify(payload));
     const correlationId = uid();
-    const { promise, cancel } = this.router.registerWithChannel(correlationId);
+    const event: EventMessage =
+      executionNode.type !== 'flow_tool'
+        ? {
+            function: executionNode.data.function.name,
+            node: executionNode.id,
+            workflow: eventState.workflow,
+            version: executionNode.data.function.version,
+            server: executionNode.data.function.server,
+            event: Events.FunctionRequest,
+            text: `Node ${executionNode.id} is invoking a function from a tool server`,
+            run: eventState.run,
+            meta: { calling_server: eventState.server },
+            payload: body,
+            correlationId,
+          }
+        : {
+            function: '',
+            node: executionNode.id,
+            workflow: eventState.workflow,
+            version: '',
+            server: eventState.server,
+            event: Events.FlowNodeRequest,
+            text: `Node ${executionNode.id} is invoking a flow from a tool server`,
+            run: eventState.run,
+            meta: null,
+            payload: body,
+            correlationId,
+          };
 
-    const timeoutMs = timeoutMinutes * 60 * 1000;
-    const timeoutHandle = setTimeout(() => {
-      cancel();
-    }, timeoutMs);
-
-    try {
-      const payloadBuffer = Buffer.from(JSON.stringify(payload));
-
-      let event: EventMessage;
-
-      if (executionNode.type !== 'flow_tool') {
-        event = {
-          function: executionNode.data.function.name,
-          node: executionNode.id,
-          workflow: eventState.workflow,
-          version: executionNode.data.function.version,
-          server: executionNode.data.function.server,
-          event: Events.FunctionRequest,
-          text: `Node ${executionNode.id} is invoking a function from a tool server`,
-          run: eventState.run,
-          meta: { calling_server: eventState.server },
-          payload: payloadBuffer,
-          correlationId,
-        };
-      } else {
-        event = {
-          function: '',
-          node: executionNode.id,
-          workflow: eventState.workflow,
-          version: '',
-          server: eventState.server,
-          event: Events.FlowNodeRequest,
-          text: `Node ${executionNode.id} is invoking a flow from a tool server`,
-          run: eventState.run,
-          meta: null,
-          payload: payloadBuffer,
-          correlationId,
-        };
-      }
-
-      await this.communicator.sendEvent(event);
-
-      const response = await promise;
-      clearTimeout(timeoutHandle);
-
-      console.log(`RpcClient: Received function response for correlation ID: ${correlationId}`);
-
-      if (!response.payload) {
-        throw new Error('Received empty payload');
-      }
-
-      return response.payload;
-    } catch (err) {
-      clearTimeout(timeoutHandle);
-      throw err;
+    const options_: RequestOptions & { timeoutMs: number } = { timeoutMs: timeoutMinutes * 60_000, signal: options.signal };
+    const response = await this.router.request(correlationId, () => this.communicator.sendEvent(event), 'function_response', options_);
+    if (!response.payload || response.payload.length === 0) {
+      throw new Error('received empty payload');
     }
+    return response.payload;
   }
 
-  /**
-   * Handle a call response from the server.
-   */
+  /** Routes function_response to the waiting call. */
   handleCallResponse(response: EventMessage): void {
-    if (response.event !== Events.FunctionResponse) {
-      return;
-    }
+    if (response.event !== Events.FunctionResponse) return;
     this.router.deliver(response.correlationId, response);
   }
 }
-

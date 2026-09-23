@@ -1,153 +1,97 @@
 import { EventMessage, Events } from '../../types/events';
-import { CorrelationRouter } from '../correlation/router';
+import { CorrelationRouter, RequestOptions, TimeoutError } from '../correlation/router';
 import { uid } from '../utils/uid';
+import { log } from '../log';
 
 /**
  * WorkflowCommunicator interface for sending events.
  */
 export interface WorkflowCommunicator {
   sendEvent(event: EventMessage): Promise<void>;
-  isConnected(): boolean;
+}
+
+function request(event: string, text: string, fields: Partial<EventMessage>): EventMessage {
+  return {
+    function: '',
+    node: '',
+    workflow: '',
+    version: '',
+    server: '',
+    event,
+    text,
+    run: '',
+    meta: null,
+    payload: null,
+    correlationId: uid(),
+    ...fields,
+  };
 }
 
 /**
- * GrpcCacheClient provides a cache client over the workflow gRPC stream
- * using correlation IDs for request/response matching.
+ * The platform cache, over the workflow stream. A lookup waits for
+ * cache_get_response on its correlation id; a set is fire-and-forget.
  */
 export class GrpcCacheClient {
-  private communicator: WorkflowCommunicator;
-  private router: CorrelationRouter;
-  private defaultTimeoutMs: number;
-  private serverName: string;
+  private readonly router = new CorrelationRouter();
 
   constructor(
-    communicator: WorkflowCommunicator,
-    serverName: string,
-    defaultTimeoutMs: number = 30000
-  ) {
-    this.communicator = communicator;
-    this.serverName = serverName;
-    this.defaultTimeoutMs = defaultTimeoutMs;
-    this.router = new CorrelationRouter();
-  }
+    private readonly communicator: WorkflowCommunicator,
+    private readonly serverName: string,
+    private readonly defaultTimeoutMs: number = 30_000,
+  ) {}
 
   /**
-   * Get a cached value by string key.
+   * The cached value for a key, or null on a miss. A lookup that times out is
+   * a miss too: a cache is advisory. It throws only when the request cannot
+   * be sent or the signal aborts.
    */
-  async getByString(key: string, timeoutMs?: number): Promise<Buffer | null> {
-    if (!this.communicator.isConnected()) {
-      throw new Error('grpccache: no communicator connected');
-    }
-
-    const correlationId = uid();
-    const { promise, cancel } = this.router.registerWithChannel(correlationId);
-
-    const timeout = timeoutMs ?? this.defaultTimeoutMs;
-    const timeoutHandle = setTimeout(() => {
-      cancel();
-    }, timeout);
-
+  async getByString(key: string, options: RequestOptions = {}): Promise<Buffer | null> {
+    const event = request(Events.CacheGetRequest, 'Cache get request', {
+      meta: { Key: key, calling_server: this.serverName },
+    });
+    let response: EventMessage;
     try {
-      const event: EventMessage = {
-        function: '',
-        node: '',
-        workflow: '',
-        version: '',
-        server: '',
-        event: Events.CacheGetRequest,
-        text: 'Cache get request',
-        run: '',
-        meta: {
-          Key: key,
-          calling_server: this.serverName,
-        },
-        payload: null,
-        correlationId,
-      };
-
-      await this.communicator.sendEvent(event);
-
-      const response = await promise;
-      clearTimeout(timeoutHandle);
-
-      if (!response.payload || response.payload.length === 0) {
-        return null;
-      }
-
-      return response.payload;
+      response = await this.router.request(event.correlationId, () => this.communicator.sendEvent(event), 'cache_get_response', {
+        timeoutMs: options.timeoutMs ?? this.defaultTimeoutMs,
+        signal: options.signal,
+      });
     } catch (err) {
-      clearTimeout(timeoutHandle);
-      if ((err as Error).message.includes('cancelled')) {
+      if (err instanceof TimeoutError) {
+        log.debug(`grpccache: ${err.message}`);
         return null;
       }
       throw err;
     }
+    return response.payload && response.payload.length > 0 ? response.payload : null;
   }
 
-  /**
-   * Get a cached value by numeric key.
-   */
-  async get(key: bigint): Promise<Buffer | null> {
-    return this.getByString(key.toString());
+  /** The cached value for a numeric key (a function cache key), or null. */
+  get(key: bigint, options?: RequestOptions): Promise<Buffer | null> {
+    return this.getByString(key.toString(), options);
   }
 
-  /**
-   * Set a cached value by string key with optional TTL.
-   */
+  /** Stores a value; a TTL of 0 uses the server's default. */
   async setByString(key: string, value: Buffer, ttlSeconds: number = 0): Promise<void> {
-    if (!this.communicator.isConnected()) {
-      throw new Error('grpccache: no communicator connected');
-    }
-
-    const correlationId = uid();
-
-    const event: EventMessage = {
-      function: '',
-      node: '',
-      workflow: '',
-      version: '',
-      server: '',
-      event: Events.CacheSet,
-      text: 'Cache set',
-      run: '',
-      meta: {
-        Key: key,
-        TTL: ttlSeconds,
-        calling_server: this.serverName,
-      },
-      payload: value,
-      correlationId,
-    };
-
-    await this.communicator.sendEvent(event);
+    await this.communicator.sendEvent(
+      request(Events.CacheSet, 'Cache set', {
+        meta: { Key: key, TTL: ttlSeconds, calling_server: this.serverName },
+        payload: Buffer.from(value),
+      }),
+    );
   }
 
-  /**
-   * Set a cached value by numeric key.
-   */
-  async set(key: bigint, value: Buffer): Promise<void> {
+  set(key: bigint, value: Buffer): Promise<void> {
     return this.setByString(key.toString(), value, 0);
   }
 
-  /**
-   * Set a cached value by numeric key with TTL.
-   */
-  async setWithTTL(key: bigint, value: Buffer, ttlMs: number): Promise<void> {
-    const ttlSeconds = Math.ceil(ttlMs / 1000);
-    return this.setByString(key.toString(), value, ttlSeconds);
+  setWithTTL(key: bigint, value: Buffer, ttlMs: number): Promise<void> {
+    // Whole seconds, truncated, as sdk-go sends int64(ttl.Seconds()).
+    return this.setByString(key.toString(), value, Math.trunc(ttlMs / 1000));
   }
 
-  /**
-   * Handle a response from the server for cache operations.
-   */
+  /** Routes cache_get_response / cache_set_response to the waiting request. */
   handleResponse(response: EventMessage): void {
-    if (
-      response.event !== Events.CacheGetResponse &&
-      response.event !== Events.CacheSetResponse
-    ) {
-      return;
-    }
+    if (response.event !== Events.CacheGetResponse && response.event !== Events.CacheSetResponse) return;
     this.router.deliver(response.correlationId, response);
   }
 }
-

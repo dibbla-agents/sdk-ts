@@ -1,0 +1,11 @@
+{
+  "name": "reconnect_after_clean_close",
+  "description": "A stream the server closes with OK status is still a lost connection: the worker reconnects and registers again.",
+  "steps": [
+    { "accept": {} },
+    { "include": "handshake" },
+    { "end_stream": { "code": "OK" } },
+    { "accept": {}, "timeout_ms": 15000 },
+    { "include": "handshake" }
+  ]
+}

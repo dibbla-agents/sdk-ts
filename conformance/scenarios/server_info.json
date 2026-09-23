@@ -1,0 +1,40 @@
+{
+  "name": "server_info",
+  "description": "Discovery requests are answered on the request's correlation id without needing a workflow.",
+  "steps": [
+    { "accept": {} },
+    { "include": "handshake" },
+    { "send": { "event": "request_server_name", "correlation_id": "c-name" } },
+    { "expect": { "server": "${worker}", "event": "response_server_name", "text": "${worker}", "correlation_id": "c-name" } },
+    { "send": { "event": "request_list_functions", "correlation_id": "c-list" } },
+    {
+      "expect": {
+        "server": "${worker}",
+        "event": "response_list_functions",
+        "text": "List of functions",
+        "correlation_id": "c-list",
+        "payload": { "json": { "$fragment": "functions" } }
+      }
+    },
+    { "send": { "event": "request_server_info", "correlation_id": "c-info" } },
+    { "expect": { "server": "${worker}", "event": "response_server_name", "text": "${worker}", "correlation_id": "c-info" } },
+    {
+      "expect": {
+        "server": "${worker}",
+        "event": "response_list_functions",
+        "text": "List of functions",
+        "correlation_id": "c-info",
+        "payload": { "json": { "$fragment": "functions" } }
+      }
+    },
+    {
+      "expect": {
+        "server": "${worker}",
+        "event": "response_list_capability_providers",
+        "text": "List of capability providers",
+        "correlation_id": "c-info",
+        "payload": { "json": { "$fragment": "providers" } }
+      }
+    }
+  ]
+}

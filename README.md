@@ -13,22 +13,27 @@ This SDK mirrors the Go SDK with idiomatic TypeScript patterns:
 
 ### Prerequisites
 
-- Node.js 18.0.0 or later
+- Node.js 20 or later. This is a server-side worker SDK built on
+  `@grpc/grpc-js`; it does not run in browsers.
 - Access to a gRPC workflow server
 
 ### Installation
 
 ```bash
-npm install @dibbla-agents/sdk-ts
+npm install @dibbla/sdk-ts
 ```
+
+The package ships CommonJS and ES modules with type declarations. Define
+schemas with the `z` it re-exports: the SDK reads Zod 3 schemas to publish
+your functions' types, and `npm install zod` would give you Zod 4.
 
 ### Example Usage
 
 Create a simple worker with custom functions:
 
 ```typescript
-import * as sdk from '@dibbla-agents/sdk-ts';
-import { z } from 'zod';
+import * as sdk from '@dibbla/sdk-ts';
+import { z } from '@dibbla/sdk-ts';
 
 // Define input/output schemas with Zod
 const GreetingInput = z.object({
@@ -65,7 +70,7 @@ async function main() {
   // Or register multiple functions at once:
   // server.registerFunctions([greetingFn, otherFn, anotherFn]);
 
-  // Start server (blocks forever)
+  // Start the worker: runs until server.stop()
   console.log('Starting worker...');
   await server.start();
 }
@@ -77,12 +82,29 @@ main().catch(console.error);
 
 ### Environment Variables
 
-| Variable              | Default               | Description                                    |
-| --------------------- | --------------------- | ---------------------------------------------- |
-| `SERVER_NAME`         | `codex-ts-worker`     | Unique identifier for this worker              |
-| `GRPC_SERVER_ADDRESS` | `grpc.dibbla.com:443` | Address of the workflow server                 |
-| `SERVER_API_TOKEN`    | _(empty)_             | Authentication token                           |
-| `GRPC_USE_TLS`        | _(auto-detect)_       | Enable/disable TLS (`true`, `false`, or empty) |
+| Variable                        | Default               | Description                                                                 |
+| ------------------------------- | --------------------- | --------------------------------------------------------------------------- |
+| `SERVER_NAME`                   | `codex-ts-worker`     | Unique identifier for this worker                                           |
+| `GRPC_SERVER_ADDRESS`           | `grpc.dibbla.com:443` | Address of the workflow server                                              |
+| `SERVER_API_TOKEN`              | _(empty)_             | API token. When set, it wins over a workload identity token                 |
+| `DIBBLA_IDENTITY_TOKEN_FILE`    | _(set by platform)_   | Workload identity token file; see [Authentication](#authentication)         |
+| `SERVER_ORG_ID`                 | _(empty)_             | Pin registration to one organization (sent as `x-org-id`)                   |
+| `GRPC_USE_TLS`                  | _(auto-detect)_       | Enable/disable TLS (`true`, `false`, or empty)                              |
+| `GRPC_TLS_INSECURE_SKIP_VERIFY` | `false`               | Skip server certificate verification (insecure; self-signed servers only)   |
+| `GRPC_KEEPALIVE_TIME_SEC`       | `300`                 | HTTP/2 keepalive ping interval; see [Connection](#robust-connection-management) |
+| `GRPC_KEEPALIVE_TIMEOUT_SEC`    | `20`                  | HTTP/2 keepalive ack timeout                                                |
+| `SDK_LOG_LEVEL`              | `info`                | SDK log level: `debug`, `info`, `warn`, `error` or `silent`                 |
+
+### Authentication
+
+- **On the Dibbla platform, no configuration is needed.** The platform mounts a
+  workload identity token and sets `DIBBLA_IDENTITY_TOKEN_FILE`. The SDK
+  presents it and re-reads it at every (re)connect, so token rotation just
+  works. `/var/run/secrets/dibbla/identity/token` is also probed.
+- **Everywhere else**, set `SERVER_API_TOKEN`. An explicit token always wins
+  over an identity token.
+- If the token's owner belongs to several organizations, set `SERVER_ORG_ID`
+  to choose one. The platform verifies membership.
 
 ### TLS Configuration
 
@@ -129,13 +151,16 @@ const fn = sdk.newSimpleFunction({
   description: 'A simple function',
   input: MyInputSchema,
   output: MyOutputSchema,
-  handler: (input) => {
-    // Your logic here
+  handler: (input, { caller, signal }) => {
+    // Your logic here. caller is the verified user, if any; see below.
     return output;
   },
   tags: ['tag1', 'tag2'], // Optional - see note below
 });
 ```
+
+A failing handler (a thrown error or rejected promise) is reported to the
+caller as `Function execution failed: handler error: <message>`.
 
 > **Note on Tags**: The `tags` field is optional and currently not used by most workflow features. It is included for future use cases such as function discovery, filtering, or categorization. You can omit it or leave it as an empty array.
 
@@ -161,20 +186,60 @@ const fn = sdk.newFunction({
 });
 ```
 
+### Knowing Who Is Calling
+
+A function exposed as a directly callable tool runs on behalf of a person.
+When a signed-in user calls it (platform MCP, API or CLI), the platform
+asserts who they are. The SDK hands that to simple handlers as
+`context.caller`, and advanced handlers can read it with
+`sdk.callerFromEvent(event)`:
+
+```typescript
+const myNotes = sdk.newSimpleFunction({
+  name: 'my_notes',
+  version: '1.0.0',
+  description: "List the caller's notes",
+  input: z.object({ query: z.string() }),
+  output: z.object({ notes: z.array(z.string()) }),
+  handler: async (input, { caller }) => {
+    if (!caller?.isUser()) {
+      throw new Error('this function needs a signed-in user');
+    }
+    return { notes: await notesFor(caller.userId, input.query) };
+  },
+});
+```
+
+`caller` is `null` when the platform asserted no identity, for instance for a
+call from inside a workflow run. Treat that as "no user", never as a default
+user. The values come from the platform, outside the payload, so an input
+field can never impersonate anyone. Never read identity from inputs. Prefer
+`userId` as a database key (an email can be reassigned), and in a worker that
+serves one organization, reject calls whose `orgId` is not yours.
+
 ## Features
 
 ### Type-Safe Functions with Zod
 
 - Define input/output schemas using Zod
-- Automatic JSON Schema generation for function registration
-- Runtime validation of inputs and outputs
+- Schemas are published to the platform in the same flattened format sdk-go
+  uses: `{"tags": "[]string", "items[].name": "string", "nested.inner": "string"}`.
+  Arrays are declared under the key callers send, with `[]` describing the
+  elements of object arrays.
+- Runtime validation of inputs and outputs. Keys not in the output schema are
+  dropped before the response is sent.
+- `z.bigint()`, `z.date()`, `z.set()` and `z.map()` work on both sides: they
+  arrive as JSON numbers, RFC 3339 strings, arrays and objects, and are sent
+  back the same way. Integers beyond 2^53 lose precision in JSON parsing, as
+  in any JavaScript; send such ids as strings.
 - Full TypeScript type inference
 
 ### Built-in Caching
 
-- Per-function cache TTL configuration
-- Automatic cache key generation using murmur3 hash
-- gRPC-based distributed cache
+- Per-function cache TTL configuration (`cacheTTLMs`; whole seconds on the wire)
+- Cache keys are MurmurHash3 over the payload bytes, function name and version,
+  identical to sdk-go's
+- gRPC-based distributed cache. A cache that doesn't answer counts as a miss
 
 ### OAuth Access Tokens
 
@@ -197,12 +262,9 @@ const fn = sdk.newFunction({
   input: MyInputSchema,
   output: MyOutputSchema,
   handler: async (input, event, globalState) => {
-    // Get an access token for Google
-    const token = await globalState.oauth?.getAccessToken('google', event.run);
-    
-    if (!token) {
-      throw new Error('Please connect your Google account first');
-    }
+    // Get an access token for Google. Throws sdk.OAuthError when the user
+    // has not connected the provider, sdk.TimeoutError if no answer comes.
+    const token = await globalState.oauth!.getAccessToken('google', event.run);
 
     // Use the token to call Google APIs
     // token.accessToken - the bearer token
@@ -255,8 +317,8 @@ This tutorial walks through building a function that reads data from Google Shee
 Start by defining the input and output schemas with Zod:
 
 ```typescript
-import * as sdk from '@dibbla-agents/sdk-ts';
-import { z } from 'zod';
+import * as sdk from '@dibbla/sdk-ts';
+import { z } from '@dibbla/sdk-ts';
 
 // Input: just the Google Sheets URL
 const ReadSheetsInput = z.object({
@@ -414,8 +476,8 @@ my-worker/
 Each module exports its function definitions:
 
 ```typescript
-import * as sdk from '@dibbla-agents/sdk-ts';
-import { z } from 'zod';
+import * as sdk from '@dibbla/sdk-ts';
+import { z } from '@dibbla/sdk-ts';
 
 const ReadSheetsInput = z.object({
   url: z.string(),
@@ -467,7 +529,7 @@ The entry point becomes remarkably concise:
 
 ```typescript
 import 'dotenv/config';
-import * as sdk from '@dibbla-agents/sdk-ts';
+import * as sdk from '@dibbla/sdk-ts';
 import * as functions from './functions';
 
 async function main() {
@@ -494,6 +556,106 @@ main().catch(console.error);
 - **Scalable** - Add new functions without touching the entry point
 
 ---
+
+### Capability Providers
+
+A capability provider replaces a built-in agent capability for the agent
+nodes that bind it. Providers are announced with your functions but never
+appear as functions.
+
+**Tool search** chooses which tools an agent gets for a query. You select from
+the offered candidates; you never add tools:
+
+```typescript
+server.registerCapabilityProvider(
+  sdk.toolSearchProvider({
+    name: 'keyword-scorer',
+    description: 'Ranks tools by keyword overlap',
+    version: '1.0.0',
+    select: (query, stubs, topN) =>
+      stubs
+        .map((s) => ({ name: s.name, score: overlap(query, `${s.name} ${s.description ?? ''}`) }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, topN)
+        .map((s) => s.name),
+  }),
+);
+```
+
+**Memory** decides which conversation history the model sees, under an
+enforced token budget. The platform keeps custody of the stored history: what
+you return is used for that one run and never written back.
+
+```typescript
+server.registerCapabilityProvider(
+  sdk.memoryProvider({
+    name: 'recent-only',
+    description: 'Keeps the last few turns',
+    version: '1.0.0',
+    maxHistoryFraction: 0.5,
+    transform: async (currentMessage, turns, tokenBudget, meta, signal) => {
+      // meta.org_id / meta.user_id are asserted by the engine: safe to
+      // partition storage on. meta.thread_id is caller-supplied: never a boundary.
+      return turns.slice(-6);
+    },
+  }),
+);
+```
+
+- Throwing fails the agent node; there is no fallback to the built-in behaviour.
+- Calls have a hard budget of about 15 seconds. When the engine abandons a call
+  (timeout, run terminated), `signal` aborts: stop work, and above all don't
+  commit side effects nobody will read.
+- To declare extra node ports, pass `extraInputsSchema` / `extraOutputsSchema`
+  and use `selectFull` / `transformFull`, which receive `extraInputs` and may
+  return `extraOutputs`. Registration fails if ports are declared with only
+  the positional handler.
+- The memory seat sends full conversation content (text, tool arguments and
+  results, reasoning) to your worker.
+
+### Jobs
+
+Jobs are long-running work the platform triggers, such as pipeline tasks.
+Unlike functions they report progress while they run:
+
+```typescript
+server.registerJob(
+  sdk.newJob({
+    id: 'sync_contacts',
+    name: 'Sync contacts',
+    parameters: [
+      { name: 'limit', type: 'int', required: true },
+      { name: 'source', type: 'string', required: false, default: 'crm' },
+    ],
+    async execute(ctx) {
+      const limit = ctx.getIntArg('limit', 100);
+      ctx.logger.info(`syncing up to ${limit} contacts`);
+
+      ctx.logger.taskStarted('fetch');
+      for (let i = 1; i <= limit; i++) {
+        // ...
+        ctx.logger.progress(i, limit, 'fetching');
+      }
+      ctx.logger.taskCompleted();
+      // Throwing fails the run with the error's message.
+    },
+  }),
+);
+```
+
+Jobs are announced on connect and again after every reconnect. The logger
+sends `log_message`, `task_*` and `progress_update` events for the run, and the
+SDK sends `job_started`, `job_completed` or `job_failed` around `execute`.
+
+When a job calls a workflow, stamp the request with `sdk.originHeaders(ctx)`.
+That ties the resulting run to the current pipeline task, so the platform can
+show which task made which calls:
+
+```typescript
+ctx.logger.taskStarted('GenerateSentiment');
+const origin = sdk.originHeaders(ctx); // once per task, after taskStarted
+await fetch(workflowUrl, { method: 'POST', headers: { ...origin, 'Content-Type': 'application/json' }, body });
+```
 
 ### Status Messages
 
@@ -562,19 +724,35 @@ await globalState.rpc?.sendStatusEvent(event, text, payload?);
 Store and retrieve data associated with workflows:
 
 ```typescript
-// Get a value
+// Get a value: null when there is none
 const value = await globalState.store?.getString(event.workflow, 'my-key');
 
 // Set a value
 await globalState.store?.setString(event.workflow, 'my-key', 'my-value');
 ```
 
+A read that gets no answer in time throws `sdk.TimeoutError` instead of
+returning `null`, so a read-modify-write never overwrites data it didn't see.
+Requests that wait for an answer (store and cache reads, OAuth, RPC) accept
+`{ timeoutMs, signal }`; the default timeout is 30 seconds.
+
 ### Robust Connection Management
 
-- Automatic reconnection on failure
-- Configurable health checks
-- Ping/pong keep-alive mechanism
-- Connection state monitoring
+- **Automatic reconnection.** Retries start at `grpcReconnectIntervalSec` (5s)
+  and double up to 5 minutes, with jitter so a fleet doesn't reconnect in
+  lockstep. A connection that stays up for a minute resets the backoff.
+- **Re-registration.** After every reconnect the worker registers its
+  functions again, because the server has forgotten it.
+- **Rejected credentials don't cause a retry storm.** An `Unauthenticated` or
+  `PermissionDenied` stream goes straight to the 5-minute cadence, unless the
+  identity token file has rotated since, in which case the new token is tried
+  promptly.
+- **Dead-connection detection.** HTTP/2 keepalive pings every 5 minutes. Don't
+  go below that when dialing a gRPC server directly: servers answer faster
+  pings with GOAWAY `too_many_pings`. Behind a proxy that answers pings itself
+  (e.g. Traefik), 30 seconds is safe.
+- Application-level ping every `pingIntervalSec` (30s; 0 disables).
+- `server.stop()` disconnects and makes `start()` return.
 
 ### Function Tags
 
@@ -607,14 +785,16 @@ const fn = sdk.newSimpleFunction({
 **Authentication Errors**: 
 - Ensure `SERVER_API_TOKEN` is set if the server requires authentication
 - Check token is valid and not expired
+- After a rejection the worker retries every ~5 minutes; restart it after fixing the token to reconnect at once
 
 **TLS Certificate Errors**:
 - Ensure system CA certificates are up to date
-- For self-signed certificates, you may need to disable TLS verification (not recommended for production)
+- For self-signed certificates, set `GRPC_TLS_INSECURE_SKIP_VERIFY=true` (the connection stays encrypted but the server is not verified; never in production)
 
 ### Debug Mode
 
-Enable verbose logging by examining console output. The SDK logs all connection attempts, event messages, and errors.
+Set `SDK_LOG_LEVEL=debug` to log every event sent and received. Payloads are
+never logged: they carry end-user data.
 
 ## License
 

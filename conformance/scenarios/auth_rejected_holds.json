@@ -1,0 +1,10 @@
+{
+  "name": "auth_rejected_holds",
+  "description": "An Unauthenticated stream death cannot be fixed by retrying with the same credential: the worker drops to its slowest retry cadence (5 min, jittered) instead of reconnecting on the normal interval (DIB-176).",
+  "steps": [
+    { "accept": {} },
+    { "include": "handshake" },
+    { "end_stream": { "code": "UNAUTHENTICATED", "details": "Invalid or expired API token" } },
+    { "expect_no_stream": { "for_ms": 8000 } }
+  ]
+}

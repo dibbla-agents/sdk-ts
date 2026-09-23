@@ -1,0 +1,12 @@
+{
+  "name": "ping",
+  "description": "With a ping interval set the worker sends keep-alive pings on the stream.",
+  "worker": { "env": { "CONFORMANCE_PING_INTERVAL_SEC": "2" } },
+  "keep_pings": true,
+  "steps": [
+    { "accept": {} },
+    { "include": "handshake" },
+    { "expect": { "server": "${worker}", "event": "ping", "text": "ping" }, "timeout_ms": 5000 },
+    { "expect": { "server": "${worker}", "event": "ping", "text": "ping" }, "timeout_ms": 5000 }
+  ]
+}

@@ -1,4 +1,5 @@
 import { EventMessage } from '../../types/events';
+import { log, errorMessage } from '../log';
 
 /**
  * Handler function type for processing event messages.
@@ -6,100 +7,114 @@ import { EventMessage } from '../../types/events';
 export type EventHandler = (message: EventMessage) => void | Promise<void>;
 
 /**
- * Dispatcher routes events to registered handlers and processes them
- * with controlled concurrency.
+ * Routes events to handlers, running at most `concurrency` pooled handlers at
+ * once with up to `queueSize` more waiting.
+ *
+ * Direct handlers bypass the pool and run at once. They exist because pooled
+ * handlers wait on responses to their own requests (cache, store, OAuth, RPC):
+ * if those responses queued behind requests in the same bounded pool, the
+ * pool would deadlock as soon as every slot was waiting (FAT-19). Direct
+ * handlers must therefore be quick.
  */
 export class Dispatcher {
-  private registry: Map<string, EventHandler> = new Map();
-  private queue: EventMessage[] = [];
-  private processing = 0;
-  private maxConcurrency: number;
+  private readonly pooled = new Map<string, EventHandler>();
+  private readonly direct = new Map<string, EventHandler>();
+  private readonly queue: EventMessage[] = [];
+  private inFlight = 0;
   private running = false;
+  private idle: (() => void) | null = null;
 
-  constructor(maxConcurrency: number = 8) {
-    this.maxConcurrency = maxConcurrency;
+  constructor(
+    private readonly concurrency: number = 8,
+    private readonly queueSize: number = 100,
+  ) {
+    if (this.concurrency < 1) this.concurrency = 1;
   }
 
-  /**
-   * Register a handler for a specific event type.
-   */
+  /** Associates an event with a handler run by the pool. */
   register(eventType: string, handler: EventHandler): void {
-    console.log(`[DEBUG DISPATCHER] Registering handler for event type: ${eventType}`);
-    this.registry.set(eventType, handler);
+    this.pooled.set(eventType, handler);
   }
 
-  /**
-   * Start the dispatcher workers.
-   */
+  /** Associates an event with a handler run at once, outside the pool. */
+  registerDirect(eventType: string, handler: EventHandler): void {
+    this.direct.set(eventType, handler);
+  }
+
+  hasHandler(eventType: string): boolean {
+    return this.direct.has(eventType) || this.pooled.has(eventType);
+  }
+
   start(): void {
     this.running = true;
-    this.processQueue();
+    this.drain();
   }
 
-  /**
-   * Stop the dispatcher and wait for pending tasks to complete.
-   */
+  /** Stops taking queued work and waits for running handlers to finish. */
   async stop(): Promise<void> {
     this.running = false;
-    
-    // Wait for all processing to complete
-    while (this.processing > 0) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
+    if (this.inFlight === 0) return;
+    await new Promise<void>((resolve) => (this.idle = resolve));
   }
 
   /**
-   * Dispatch a message for processing.
+   * Routes a message: direct handlers run at once, pooled ones run or queue.
+   * Returns false when the queue is full and the message was not accepted;
+   * the caller decides how to surface the overflow. Never blocks.
    */
-  dispatch(message: EventMessage): void {
-    console.log(`[DEBUG DISPATCHER] Dispatching message: event=${message.event}, function=${message.function}`);
-    console.log(`[DEBUG DISPATCHER] Queue size before: ${this.queue.length}, processing: ${this.processing}, running: ${this.running}`);
+  dispatch(message: EventMessage): boolean {
+    const direct = this.direct.get(message.event);
+    if (direct) {
+      this.run(direct, message, false);
+      return true;
+    }
+    if (!this.pooled.has(message.event)) {
+      log.debug(`No handler registered for event: ${message.event}`);
+      return true;
+    }
+    if (this.running && this.inFlight < this.concurrency) {
+      this.run(this.pooled.get(message.event)!, message, true);
+      return true;
+    }
+    if (this.queue.length >= this.queueSize) return false;
     this.queue.push(message);
-    this.processQueue();
-    console.log(`[DEBUG DISPATCHER] Queue size after: ${this.queue.length}`);
+    return true;
   }
 
-  /**
-   * Check if a handler is registered for an event type.
-   */
-  hasHandler(eventType: string): boolean {
-    return this.registry.has(eventType);
+  private run(handler: EventHandler, message: EventMessage, pooled: boolean): void {
+    if (pooled) this.inFlight++;
+    let result: void | Promise<void>;
+    try {
+      result = handler(message);
+    } catch (err) {
+      this.failed(message, err);
+      if (pooled) this.finished();
+      return;
+    }
+    Promise.resolve(result)
+      .catch((err) => this.failed(message, err))
+      .finally(() => {
+        if (pooled) this.finished();
+      });
   }
 
-  private processQueue(): void {
-    if (!this.running) return;
+  private failed(message: EventMessage, err: unknown): void {
+    log.error(`Handler for ${message.event} failed: ${errorMessage(err)}`);
+  }
 
-    while (this.queue.length > 0 && this.processing < this.maxConcurrency) {
-      const message = this.queue.shift();
-      if (message) {
-        this.processMessage(message);
-      }
+  private finished(): void {
+    this.inFlight--;
+    this.drain();
+    if (this.inFlight === 0 && this.idle) {
+      this.idle();
+      this.idle = null;
     }
   }
 
-  private async processMessage(message: EventMessage): Promise<void> {
-    console.log(`[DEBUG DISPATCHER] Processing message: event=${message.event}`);
-    console.log(`[DEBUG DISPATCHER] Registry has ${this.registry.size} handlers: ${Array.from(this.registry.keys()).join(', ')}`);
-    this.processing++;
-
-    try {
-      const handler = this.registry.get(message.event);
-      console.log(`[DEBUG DISPATCHER] Handler found for ${message.event}: ${!!handler}`);
-      if (handler) {
-        console.log(`[DEBUG DISPATCHER] Calling handler for ${message.event}...`);
-        await handler(message);
-        console.log(`[DEBUG DISPATCHER] Handler completed for ${message.event}`);
-      } else {
-        console.log(`[DEBUG DISPATCHER] No handler registered for event: ${message.event}`);
-      }
-    } catch (err) {
-      console.error(`[DEBUG DISPATCHER] Error processing event ${message.event}:`, err);
-    } finally {
-      this.processing--;
-      console.log(`[DEBUG DISPATCHER] Finished processing, processing count: ${this.processing}`);
-      // Continue processing queue
-      this.processQueue();
+  private drain(): void {
+    while (this.running && this.inFlight < this.concurrency && this.queue.length > 0) {
+      const message = this.queue.shift()!;
+      this.run(this.pooled.get(message.event)!, message, true);
     }
   }
 }
-

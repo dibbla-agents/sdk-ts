@@ -1,0 +1,17 @@
+{
+  "name": "identity_token_file",
+  "description": "Workload identity (DIB-202): with no API token, the token in DIBBLA_IDENTITY_TOKEN_FILE is presented, trimmed, and re-read on every connect so kubelet rotation is picked up.",
+  "worker": {
+    "unset": ["SERVER_API_TOKEN"],
+    "env": { "DIBBLA_IDENTITY_TOKEN_FILE": "${tmp}/identity-token" },
+    "files": { "identity-token": "  first-token\n" }
+  },
+  "steps": [
+    { "accept": { "metadata": { "authorization": "Bearer first-token" } } },
+    { "include": "handshake" },
+    { "write_file": { "name": "identity-token", "content": "second-token\n" } },
+    { "end_stream": { "code": "UNAVAILABLE", "details": "proxy restarting" } },
+    { "accept": { "metadata": { "authorization": "Bearer second-token" } }, "timeout_ms": 15000 },
+    { "include": "handshake" }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "permission_denied_holds",
+  "description": "PermissionDenied is classified like Unauthenticated: slow retry cadence.",
+  "steps": [
+    { "accept": {} },
+    { "include": "handshake" },
+    { "end_stream": { "code": "PERMISSION_DENIED", "details": "not a member of this organization" } },
+    { "expect_no_stream": { "for_ms": 8000 } }
+  ]
+}

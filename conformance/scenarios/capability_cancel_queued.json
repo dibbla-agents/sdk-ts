@@ -1,0 +1,332 @@
+{
+  "name": "capability_cancel_queued",
+  "description": "A cancel can overtake its own request: requests queue behind the 8 busy handlers, cancels do not queue. The cancel leaves a tombstone and the request is skipped when it reaches a handler, so it is never run or answered (DIB-443).",
+  "steps": [
+    {
+      "accept": {}
+    },
+    {
+      "include": "handshake"
+    },
+    {
+      "comment": "Occupy all 8 handlers (the default handler concurrency)."
+    },
+    {
+      "send": {
+        "event": "capability_provider_request",
+        "correlation_id": "c-b1",
+        "payload": {
+          "json": {
+            "capability": "memory",
+            "provider": "blocking",
+            "turns": [],
+            "current_message": "m",
+            "token_budget": 10,
+            "thread_meta": {
+              "thread_id": "t",
+              "turn_count": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "capability_provider_request",
+        "correlation_id": "c-b2",
+        "payload": {
+          "json": {
+            "capability": "memory",
+            "provider": "blocking",
+            "turns": [],
+            "current_message": "m",
+            "token_budget": 10,
+            "thread_meta": {
+              "thread_id": "t",
+              "turn_count": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "capability_provider_request",
+        "correlation_id": "c-b3",
+        "payload": {
+          "json": {
+            "capability": "memory",
+            "provider": "blocking",
+            "turns": [],
+            "current_message": "m",
+            "token_budget": 10,
+            "thread_meta": {
+              "thread_id": "t",
+              "turn_count": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "capability_provider_request",
+        "correlation_id": "c-b4",
+        "payload": {
+          "json": {
+            "capability": "memory",
+            "provider": "blocking",
+            "turns": [],
+            "current_message": "m",
+            "token_budget": 10,
+            "thread_meta": {
+              "thread_id": "t",
+              "turn_count": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "capability_provider_request",
+        "correlation_id": "c-b5",
+        "payload": {
+          "json": {
+            "capability": "memory",
+            "provider": "blocking",
+            "turns": [],
+            "current_message": "m",
+            "token_budget": 10,
+            "thread_meta": {
+              "thread_id": "t",
+              "turn_count": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "capability_provider_request",
+        "correlation_id": "c-b6",
+        "payload": {
+          "json": {
+            "capability": "memory",
+            "provider": "blocking",
+            "turns": [],
+            "current_message": "m",
+            "token_budget": 10,
+            "thread_meta": {
+              "thread_id": "t",
+              "turn_count": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "capability_provider_request",
+        "correlation_id": "c-b7",
+        "payload": {
+          "json": {
+            "capability": "memory",
+            "provider": "blocking",
+            "turns": [],
+            "current_message": "m",
+            "token_budget": 10,
+            "thread_meta": {
+              "thread_id": "t",
+              "turn_count": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "capability_provider_request",
+        "correlation_id": "c-b8",
+        "payload": {
+          "json": {
+            "capability": "memory",
+            "provider": "blocking",
+            "turns": [],
+            "current_message": "m",
+            "token_budget": 10,
+            "thread_meta": {
+              "thread_id": "t",
+              "turn_count": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "expect_none": {
+        "for_ms": 500
+      }
+    },
+    {
+      "comment": "This one waits in the queue; its cancel arrives first."
+    },
+    {
+      "send": {
+        "event": "capability_provider_request",
+        "correlation_id": "c-queued",
+        "payload": {
+          "json": {
+            "capability": "memory",
+            "provider": "blocking",
+            "turns": [],
+            "current_message": "m",
+            "token_budget": 10,
+            "thread_meta": {
+              "thread_id": "t",
+              "turn_count": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "capability_provider_cancel",
+        "correlation_id": "c-queued"
+      }
+    },
+    {
+      "comment": "Release the 8 handlers; the queued request then reaches a handler and must be skipped."
+    },
+    {
+      "send": {
+        "event": "capability_provider_cancel",
+        "correlation_id": "c-b1"
+      }
+    },
+    {
+      "send": {
+        "event": "capability_provider_cancel",
+        "correlation_id": "c-b2"
+      }
+    },
+    {
+      "send": {
+        "event": "capability_provider_cancel",
+        "correlation_id": "c-b3"
+      }
+    },
+    {
+      "send": {
+        "event": "capability_provider_cancel",
+        "correlation_id": "c-b4"
+      }
+    },
+    {
+      "send": {
+        "event": "capability_provider_cancel",
+        "correlation_id": "c-b5"
+      }
+    },
+    {
+      "send": {
+        "event": "capability_provider_cancel",
+        "correlation_id": "c-b6"
+      }
+    },
+    {
+      "send": {
+        "event": "capability_provider_cancel",
+        "correlation_id": "c-b7"
+      }
+    },
+    {
+      "send": {
+        "event": "capability_provider_cancel",
+        "correlation_id": "c-b8"
+      }
+    },
+    {
+      "expect_unordered": [
+        {
+          "event": "capability_provider_response",
+          "correlation_id": "c-b1",
+          "payload": {
+            "json": {
+              "error": "$nonempty"
+            }
+          }
+        },
+        {
+          "event": "capability_provider_response",
+          "correlation_id": "c-b2",
+          "payload": {
+            "json": {
+              "error": "$nonempty"
+            }
+          }
+        },
+        {
+          "event": "capability_provider_response",
+          "correlation_id": "c-b3",
+          "payload": {
+            "json": {
+              "error": "$nonempty"
+            }
+          }
+        },
+        {
+          "event": "capability_provider_response",
+          "correlation_id": "c-b4",
+          "payload": {
+            "json": {
+              "error": "$nonempty"
+            }
+          }
+        },
+        {
+          "event": "capability_provider_response",
+          "correlation_id": "c-b5",
+          "payload": {
+            "json": {
+              "error": "$nonempty"
+            }
+          }
+        },
+        {
+          "event": "capability_provider_response",
+          "correlation_id": "c-b6",
+          "payload": {
+            "json": {
+              "error": "$nonempty"
+            }
+          }
+        },
+        {
+          "event": "capability_provider_response",
+          "correlation_id": "c-b7",
+          "payload": {
+            "json": {
+              "error": "$nonempty"
+            }
+          }
+        },
+        {
+          "event": "capability_provider_response",
+          "correlation_id": "c-b8",
+          "payload": {
+            "json": {
+              "error": "$nonempty"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect_none": {
+        "for_ms": 1000
+      }
+    }
+  ]
+}

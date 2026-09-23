@@ -1,0 +1,150 @@
+{
+  "name": "job_run",
+  "description": "A job_trigger runs the job; the lifecycle, log, task and progress events carry the run id as both run and correlation id, and describe themselves in meta with an RFC 3339 timestamp. A trigger without a job name gets the handler's.",
+  "steps": [
+    {
+      "accept": {}
+    },
+    {
+      "include": "handshake"
+    },
+    {
+      "send": {
+        "event": "job_trigger",
+        "run": "run-job-1",
+        "meta": {
+          "job_id": "count_job"
+        },
+        "payload": {
+          "json": {
+            "limit": 2,
+            "label": "rows"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "server": "${worker}",
+        "event": "job_started",
+        "run": "run-job-1",
+        "correlation_id": "run-job-1",
+        "meta": {
+          "timestamp": "$nonempty",
+          "job_id": "count_job",
+          "job_name": "Count Job",
+          "status": "in_progress"
+        }
+      }
+    },
+    {
+      "expect": {
+        "server": "${worker}",
+        "event": "log_message",
+        "run": "run-job-1",
+        "correlation_id": "run-job-1",
+        "meta": {
+          "timestamp": "$nonempty",
+          "job_id": "count_job",
+          "job_name": "Count Job",
+          "log_level": "info"
+        },
+        "text": "starting"
+      }
+    },
+    {
+      "expect": {
+        "server": "${worker}",
+        "event": "task_started",
+        "run": "run-job-1",
+        "correlation_id": "run-job-1",
+        "meta": {
+          "timestamp": "$nonempty",
+          "job_id": "count_job",
+          "job_name": "Count Job",
+          "task_name": "count",
+          "status": "in_progress"
+        }
+      }
+    },
+    {
+      "expect": {
+        "server": "${worker}",
+        "event": "progress_update",
+        "run": "run-job-1",
+        "correlation_id": "run-job-1",
+        "meta": {
+          "timestamp": "$nonempty",
+          "job_id": "count_job",
+          "job_name": "Count Job",
+          "task_name": "count",
+          "progress_current": 1,
+          "progress_total": 2
+        },
+        "text": "counting rows"
+      }
+    },
+    {
+      "expect": {
+        "server": "${worker}",
+        "event": "progress_update",
+        "run": "run-job-1",
+        "correlation_id": "run-job-1",
+        "meta": {
+          "timestamp": "$nonempty",
+          "job_id": "count_job",
+          "job_name": "Count Job",
+          "task_name": "count",
+          "progress_current": 2,
+          "progress_total": 2
+        },
+        "text": "counting rows"
+      }
+    },
+    {
+      "expect": {
+        "server": "${worker}",
+        "event": "task_completed",
+        "run": "run-job-1",
+        "correlation_id": "run-job-1",
+        "meta": {
+          "timestamp": "$nonempty",
+          "job_id": "count_job",
+          "job_name": "Count Job",
+          "task_name": "count",
+          "status": "completed"
+        }
+      }
+    },
+    {
+      "expect": {
+        "server": "${worker}",
+        "event": "log_message",
+        "run": "run-job-1",
+        "correlation_id": "run-job-1",
+        "meta": {
+          "timestamp": "$nonempty",
+          "job_id": "count_job",
+          "job_name": "Count Job",
+          "task_name": "count",
+          "log_level": "warn"
+        },
+        "text": "done"
+      }
+    },
+    {
+      "expect": {
+        "server": "${worker}",
+        "event": "job_completed",
+        "run": "run-job-1",
+        "correlation_id": "run-job-1",
+        "meta": {
+          "timestamp": "$nonempty",
+          "job_id": "count_job",
+          "job_name": "Count Job",
+          "status": "completed"
+        }
+      }
+    }
+  ]
+}

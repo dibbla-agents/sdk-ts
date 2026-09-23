@@ -1,0 +1,106 @@
+{
+  "name": "tool_search",
+  "description": "A tool_search request is answered with capability_provider_response on its correlation id: the selected names, or an error string. No server or text is set, and an empty selection is an empty object (Go omitempty).",
+  "steps": [
+    {
+      "accept": {}
+    },
+    {
+      "include": "handshake"
+    },
+    {
+      "send": {
+        "event": "capability_provider_request",
+        "correlation_id": "c-select",
+        "payload": {
+          "json": {
+            "capability": "tool_search",
+            "provider": "reverse",
+            "query": "find",
+            "stubs": [
+              {
+                "name": "a",
+                "description": "A"
+              },
+              {
+                "name": "b"
+              },
+              {
+                "name": "c"
+              }
+            ],
+            "top_n": 2
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "event": "capability_provider_response",
+        "correlation_id": "c-select",
+        "payload": {
+          "json": {
+            "selected": [
+              "c",
+              "b"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "capability_provider_request",
+        "correlation_id": "c-empty",
+        "payload": {
+          "json": {
+            "capability": "tool_search",
+            "provider": "reverse",
+            "query": "find",
+            "stubs": [],
+            "top_n": 2
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "event": "capability_provider_response",
+        "correlation_id": "c-empty",
+        "payload": {
+          "json": {}
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "capability_provider_request",
+        "correlation_id": "c-error",
+        "payload": {
+          "json": {
+            "capability": "tool_search",
+            "provider": "reverse",
+            "query": "error",
+            "stubs": [
+              {
+                "name": "a"
+              }
+            ],
+            "top_n": 2
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "event": "capability_provider_response",
+        "correlation_id": "c-error",
+        "payload": {
+          "json": {
+            "error": "kaboom"
+          }
+        }
+      }
+    }
+  ]
+}

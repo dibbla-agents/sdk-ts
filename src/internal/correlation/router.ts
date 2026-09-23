@@ -1,105 +1,74 @@
 import { EventMessage } from '../../types/events';
 
-/**
- * CorrelationRouter manages request/response channels by correlation ID.
- * Used for implementing request-response patterns over the streaming gRPC connection.
- */
-export class CorrelationRouter {
-  private channels: Map<string, {
-    resolve: (msg: EventMessage) => void;
-    reject: (err: Error) => void;
-  }[]> = new Map();
+/** Options for a request that waits for its response. */
+export interface RequestOptions {
+  /** Give up after this long. Defaults to the client's timeout (30s). */
+  timeoutMs?: number;
+  /** Give up when this aborts; the rejection is the signal's reason. */
+  signal?: AbortSignal;
+}
 
-  /**
-   * Register a pending response handler for the given correlation ID.
-   * Returns a promise that resolves when a response is delivered.
-   */
-  register(correlationId: string, timeoutMs?: number): Promise<EventMessage> {
-    return new Promise((resolve, reject) => {
-      const handlers = this.channels.get(correlationId) || [];
-      handlers.push({ resolve, reject });
-      this.channels.set(correlationId, handlers);
-
-      // Set up timeout if specified
-      if (timeoutMs && timeoutMs > 0) {
-        setTimeout(() => {
-          this.remove(correlationId);
-          reject(new Error(`Timeout waiting for response: ${correlationId}`));
-        }, timeoutMs);
-      }
-    });
-  }
-
-  /**
-   * Register with a callback-style interface (for compatibility with Go SDK pattern)
-   */
-  registerWithChannel(correlationId: string): {
-    promise: Promise<EventMessage>;
-    cancel: () => void;
-  } {
-    let resolveRef: (msg: EventMessage) => void;
-    let rejectRef: (err: Error) => void;
-
-    const promise = new Promise<EventMessage>((resolve, reject) => {
-      resolveRef = resolve;
-      rejectRef = reject;
-      
-      const handlers = this.channels.get(correlationId) || [];
-      handlers.push({ resolve, reject });
-      this.channels.set(correlationId, handlers);
-    });
-
-    return {
-      promise,
-      cancel: () => {
-        this.remove(correlationId);
-        rejectRef!(new Error('Request cancelled'));
-      },
-    };
-  }
-
-  /**
-   * Remove the channel registration for the given correlation ID.
-   */
-  remove(correlationId: string): void {
-    this.channels.delete(correlationId);
-  }
-
-  /**
-   * Deliver a response message to the registered handler.
-   * Returns true if a handler was found and notified.
-   */
-  deliver(correlationId: string, message: EventMessage): boolean {
-    const handlers = this.channels.get(correlationId);
-    if (!handlers || handlers.length === 0) {
-      return false;
-    }
-
-    // Deliver to the first waiting handler
-    const handler = handlers.shift();
-    if (handler) {
-      handler.resolve(message);
-    }
-
-    // Clean up if no more handlers
-    if (handlers.length === 0) {
-      this.channels.delete(correlationId);
-    }
-
-    return true;
-  }
-
-  /**
-   * Reject all pending requests with an error.
-   * Used during shutdown or disconnect.
-   */
-  rejectAll(error: Error): void {
-    this.channels.forEach((handlers) => {
-      for (const handler of handlers) {
-        handler.reject(error);
-      }
-    });
-    this.channels.clear();
+/** A response did not arrive in time. */
+export class TimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TimeoutError';
   }
 }
 
+/**
+ * Pairs requests sent on the event stream with the responses that carry the
+ * same correlation id.
+ */
+export class CorrelationRouter {
+  private readonly waiters = new Map<string, (message: EventMessage) => void>();
+
+  /**
+   * Sends a request and resolves with its response. The waiter is registered
+   * before sending, so a fast response cannot be missed; every outcome
+   * (response, timeout, abort, send failure) removes it.
+   */
+  request(correlationId: string, send: () => Promise<void>, awaiting: string, options: RequestOptions & { timeoutMs: number }): Promise<EventMessage> {
+    const { timeoutMs, signal } = options;
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(signal.reason);
+        return;
+      }
+      let timer: NodeJS.Timeout | undefined;
+      const onAbort = () => finish(() => reject(signal!.reason));
+      const finish = (settle: () => void) => {
+        if (!this.waiters.has(correlationId)) return;
+        this.waiters.delete(correlationId);
+        if (timer) clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+        settle();
+      };
+
+      this.waiters.set(correlationId, (message) => finish(() => resolve(message)));
+      // As with a Go context deadline, a timeout of 0 or less expires at once.
+      timer = setTimeout(
+        () => finish(() => reject(new TimeoutError(`timed out after ${timeoutMs}ms waiting for ${awaiting}`))),
+        Math.max(0, timeoutMs),
+      );
+      signal?.addEventListener('abort', onAbort, { once: true });
+      send().catch((err) => finish(() => reject(err)));
+    });
+  }
+
+  /**
+   * Hands a response to its waiting request. Returns false when nobody is
+   * waiting (a late or duplicate response), which is dropped.
+   */
+  deliver(correlationId: string, message: EventMessage): boolean {
+    const waiter = this.waiters.get(correlationId);
+    if (!waiter) return false;
+    waiter(message);
+    return true;
+  }
+
+  /** Requests still waiting for a response. */
+  get pending(): number {
+    return this.waiters.size;
+  }
+}

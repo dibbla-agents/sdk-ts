@@ -1,0 +1,50 @@
+{
+  "name": "capability_catalog",
+  "description": "The capability catalog pre-sync (DIB-152) is one-way: accepted, never answered.",
+  "steps": [
+    {
+      "accept": {}
+    },
+    {
+      "include": "handshake"
+    },
+    {
+      "send": {
+        "event": "capability_catalog",
+        "payload": {
+          "json": {
+            "capability": "tool_search",
+            "provider": "reverse",
+            "stubs": [
+              {
+                "name": "a"
+              },
+              {
+                "name": "b"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "request_server_name",
+        "correlation_id": "c-barrier"
+      }
+    },
+    {
+      "expect": {
+        "server": "${worker}",
+        "event": "response_server_name",
+        "text": "${worker}",
+        "correlation_id": "c-barrier"
+      }
+    },
+    {
+      "expect_none": {
+        "for_ms": 500
+      }
+    }
+  ]
+}

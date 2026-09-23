@@ -1,0 +1,596 @@
+{
+  "name": "responses_bypass_busy_handlers",
+  "description": "Responses to a worker's own requests (store, cache, OAuth, RPC) must reach the handlers waiting for them even when every handler is busy waiting (FAT-19). Eight concurrent store_append calls fill all 8 handlers, each blocked on its store_get_request.",
+  "steps": [
+    {
+      "accept": {}
+    },
+    {
+      "include": "handshake"
+    },
+    {
+      "send": {
+        "event": "function_request",
+        "function": "store_append",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-1",
+        "run": "run-wf-1",
+        "correlation_id": "c-wf-1",
+        "payload": {
+          "json": {
+            "text": "wf-1"
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "function_request",
+        "function": "store_append",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-2",
+        "run": "run-wf-2",
+        "correlation_id": "c-wf-2",
+        "payload": {
+          "json": {
+            "text": "wf-2"
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "function_request",
+        "function": "store_append",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-3",
+        "run": "run-wf-3",
+        "correlation_id": "c-wf-3",
+        "payload": {
+          "json": {
+            "text": "wf-3"
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "function_request",
+        "function": "store_append",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-4",
+        "run": "run-wf-4",
+        "correlation_id": "c-wf-4",
+        "payload": {
+          "json": {
+            "text": "wf-4"
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "function_request",
+        "function": "store_append",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-5",
+        "run": "run-wf-5",
+        "correlation_id": "c-wf-5",
+        "payload": {
+          "json": {
+            "text": "wf-5"
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "function_request",
+        "function": "store_append",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-6",
+        "run": "run-wf-6",
+        "correlation_id": "c-wf-6",
+        "payload": {
+          "json": {
+            "text": "wf-6"
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "function_request",
+        "function": "store_append",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-7",
+        "run": "run-wf-7",
+        "correlation_id": "c-wf-7",
+        "payload": {
+          "json": {
+            "text": "wf-7"
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "function_request",
+        "function": "store_append",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-8",
+        "run": "run-wf-8",
+        "correlation_id": "c-wf-8",
+        "payload": {
+          "json": {
+            "text": "wf-8"
+          }
+        }
+      }
+    },
+    {
+      "expect_unordered": [
+        {
+          "workflow": "wf-1",
+          "event": "store_get_request",
+          "text": "Store get request",
+          "correlation_id": "$capture:get_wf_1",
+          "meta": {
+            "Workflow": "wf-1",
+            "Key": "history",
+            "calling_server": "${worker}"
+          }
+        },
+        {
+          "workflow": "wf-2",
+          "event": "store_get_request",
+          "text": "Store get request",
+          "correlation_id": "$capture:get_wf_2",
+          "meta": {
+            "Workflow": "wf-2",
+            "Key": "history",
+            "calling_server": "${worker}"
+          }
+        },
+        {
+          "workflow": "wf-3",
+          "event": "store_get_request",
+          "text": "Store get request",
+          "correlation_id": "$capture:get_wf_3",
+          "meta": {
+            "Workflow": "wf-3",
+            "Key": "history",
+            "calling_server": "${worker}"
+          }
+        },
+        {
+          "workflow": "wf-4",
+          "event": "store_get_request",
+          "text": "Store get request",
+          "correlation_id": "$capture:get_wf_4",
+          "meta": {
+            "Workflow": "wf-4",
+            "Key": "history",
+            "calling_server": "${worker}"
+          }
+        },
+        {
+          "workflow": "wf-5",
+          "event": "store_get_request",
+          "text": "Store get request",
+          "correlation_id": "$capture:get_wf_5",
+          "meta": {
+            "Workflow": "wf-5",
+            "Key": "history",
+            "calling_server": "${worker}"
+          }
+        },
+        {
+          "workflow": "wf-6",
+          "event": "store_get_request",
+          "text": "Store get request",
+          "correlation_id": "$capture:get_wf_6",
+          "meta": {
+            "Workflow": "wf-6",
+            "Key": "history",
+            "calling_server": "${worker}"
+          }
+        },
+        {
+          "workflow": "wf-7",
+          "event": "store_get_request",
+          "text": "Store get request",
+          "correlation_id": "$capture:get_wf_7",
+          "meta": {
+            "Workflow": "wf-7",
+            "Key": "history",
+            "calling_server": "${worker}"
+          }
+        },
+        {
+          "workflow": "wf-8",
+          "event": "store_get_request",
+          "text": "Store get request",
+          "correlation_id": "$capture:get_wf_8",
+          "meta": {
+            "Workflow": "wf-8",
+            "Key": "history",
+            "calling_server": "${worker}"
+          }
+        }
+      ]
+    },
+    {
+      "send": {
+        "event": "store_get_response",
+        "correlation_id": "${get_wf_1}",
+        "payload": {
+          "json": [
+            "earlier"
+          ]
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "store_get_response",
+        "correlation_id": "${get_wf_2}",
+        "payload": {
+          "json": [
+            "earlier"
+          ]
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "store_get_response",
+        "correlation_id": "${get_wf_3}",
+        "payload": {
+          "json": [
+            "earlier"
+          ]
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "store_get_response",
+        "correlation_id": "${get_wf_4}",
+        "payload": {
+          "json": [
+            "earlier"
+          ]
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "store_get_response",
+        "correlation_id": "${get_wf_5}",
+        "payload": {
+          "json": [
+            "earlier"
+          ]
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "store_get_response",
+        "correlation_id": "${get_wf_6}",
+        "payload": {
+          "json": [
+            "earlier"
+          ]
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "store_get_response",
+        "correlation_id": "${get_wf_7}",
+        "payload": {
+          "json": [
+            "earlier"
+          ]
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "store_get_response",
+        "correlation_id": "${get_wf_8}",
+        "payload": {
+          "json": [
+            "earlier"
+          ]
+        }
+      }
+    },
+    {
+      "expect_unordered": [
+        {
+          "workflow": "wf-1",
+          "event": "store_set_request",
+          "text": "Store set request",
+          "correlation_id": "$nonempty",
+          "meta": {
+            "Workflow": "wf-1",
+            "Key": "history",
+            "calling_server": "${worker}"
+          },
+          "payload": {
+            "json": [
+              "earlier",
+              "wf-1"
+            ]
+          }
+        },
+        {
+          "workflow": "wf-2",
+          "event": "store_set_request",
+          "text": "Store set request",
+          "correlation_id": "$nonempty",
+          "meta": {
+            "Workflow": "wf-2",
+            "Key": "history",
+            "calling_server": "${worker}"
+          },
+          "payload": {
+            "json": [
+              "earlier",
+              "wf-2"
+            ]
+          }
+        },
+        {
+          "workflow": "wf-3",
+          "event": "store_set_request",
+          "text": "Store set request",
+          "correlation_id": "$nonempty",
+          "meta": {
+            "Workflow": "wf-3",
+            "Key": "history",
+            "calling_server": "${worker}"
+          },
+          "payload": {
+            "json": [
+              "earlier",
+              "wf-3"
+            ]
+          }
+        },
+        {
+          "workflow": "wf-4",
+          "event": "store_set_request",
+          "text": "Store set request",
+          "correlation_id": "$nonempty",
+          "meta": {
+            "Workflow": "wf-4",
+            "Key": "history",
+            "calling_server": "${worker}"
+          },
+          "payload": {
+            "json": [
+              "earlier",
+              "wf-4"
+            ]
+          }
+        },
+        {
+          "workflow": "wf-5",
+          "event": "store_set_request",
+          "text": "Store set request",
+          "correlation_id": "$nonempty",
+          "meta": {
+            "Workflow": "wf-5",
+            "Key": "history",
+            "calling_server": "${worker}"
+          },
+          "payload": {
+            "json": [
+              "earlier",
+              "wf-5"
+            ]
+          }
+        },
+        {
+          "workflow": "wf-6",
+          "event": "store_set_request",
+          "text": "Store set request",
+          "correlation_id": "$nonempty",
+          "meta": {
+            "Workflow": "wf-6",
+            "Key": "history",
+            "calling_server": "${worker}"
+          },
+          "payload": {
+            "json": [
+              "earlier",
+              "wf-6"
+            ]
+          }
+        },
+        {
+          "workflow": "wf-7",
+          "event": "store_set_request",
+          "text": "Store set request",
+          "correlation_id": "$nonempty",
+          "meta": {
+            "Workflow": "wf-7",
+            "Key": "history",
+            "calling_server": "${worker}"
+          },
+          "payload": {
+            "json": [
+              "earlier",
+              "wf-7"
+            ]
+          }
+        },
+        {
+          "workflow": "wf-8",
+          "event": "store_set_request",
+          "text": "Store set request",
+          "correlation_id": "$nonempty",
+          "meta": {
+            "Workflow": "wf-8",
+            "Key": "history",
+            "calling_server": "${worker}"
+          },
+          "payload": {
+            "json": [
+              "earlier",
+              "wf-8"
+            ]
+          }
+        },
+        {
+          "event": "function_response",
+          "function": "store_append",
+          "version": "1.0.0",
+          "node": "node-1",
+          "workflow": "wf-1",
+          "run": "run-wf-1",
+          "correlation_id": "c-wf-1",
+          "payload": {
+            "json": {
+              "history": [
+                "earlier",
+                "wf-1"
+              ]
+            }
+          }
+        },
+        {
+          "event": "function_response",
+          "function": "store_append",
+          "version": "1.0.0",
+          "node": "node-1",
+          "workflow": "wf-2",
+          "run": "run-wf-2",
+          "correlation_id": "c-wf-2",
+          "payload": {
+            "json": {
+              "history": [
+                "earlier",
+                "wf-2"
+              ]
+            }
+          }
+        },
+        {
+          "event": "function_response",
+          "function": "store_append",
+          "version": "1.0.0",
+          "node": "node-1",
+          "workflow": "wf-3",
+          "run": "run-wf-3",
+          "correlation_id": "c-wf-3",
+          "payload": {
+            "json": {
+              "history": [
+                "earlier",
+                "wf-3"
+              ]
+            }
+          }
+        },
+        {
+          "event": "function_response",
+          "function": "store_append",
+          "version": "1.0.0",
+          "node": "node-1",
+          "workflow": "wf-4",
+          "run": "run-wf-4",
+          "correlation_id": "c-wf-4",
+          "payload": {
+            "json": {
+              "history": [
+                "earlier",
+                "wf-4"
+              ]
+            }
+          }
+        },
+        {
+          "event": "function_response",
+          "function": "store_append",
+          "version": "1.0.0",
+          "node": "node-1",
+          "workflow": "wf-5",
+          "run": "run-wf-5",
+          "correlation_id": "c-wf-5",
+          "payload": {
+            "json": {
+              "history": [
+                "earlier",
+                "wf-5"
+              ]
+            }
+          }
+        },
+        {
+          "event": "function_response",
+          "function": "store_append",
+          "version": "1.0.0",
+          "node": "node-1",
+          "workflow": "wf-6",
+          "run": "run-wf-6",
+          "correlation_id": "c-wf-6",
+          "payload": {
+            "json": {
+              "history": [
+                "earlier",
+                "wf-6"
+              ]
+            }
+          }
+        },
+        {
+          "event": "function_response",
+          "function": "store_append",
+          "version": "1.0.0",
+          "node": "node-1",
+          "workflow": "wf-7",
+          "run": "run-wf-7",
+          "correlation_id": "c-wf-7",
+          "payload": {
+            "json": {
+              "history": [
+                "earlier",
+                "wf-7"
+              ]
+            }
+          }
+        },
+        {
+          "event": "function_response",
+          "function": "store_append",
+          "version": "1.0.0",
+          "node": "node-1",
+          "workflow": "wf-8",
+          "run": "run-wf-8",
+          "correlation_id": "c-wf-8",
+          "payload": {
+            "json": {
+              "history": [
+                "earlier",
+                "wf-8"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

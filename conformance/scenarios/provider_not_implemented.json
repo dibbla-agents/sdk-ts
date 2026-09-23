@@ -1,0 +1,88 @@
+{
+  "name": "provider_not_implemented",
+  "description": "A request for a provider without a live handler, or for one this worker never registered, gets an explicit error on the response channel instead of a timeout. An undecodable request payload is answered the same way.",
+  "steps": [
+    {
+      "accept": {}
+    },
+    {
+      "include": "handshake"
+    },
+    {
+      "send": {
+        "event": "capability_provider_request",
+        "correlation_id": "c-inert",
+        "payload": {
+          "json": {
+            "capability": "tool_search",
+            "provider": "inert",
+            "query": "q",
+            "stubs": [],
+            "top_n": 2
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "event": "capability_provider_response",
+        "correlation_id": "c-inert",
+        "payload": {
+          "json": {
+            "error": "capability provider \"inert\" for capability \"tool_search\" is not implemented by this server"
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "capability_provider_request",
+        "correlation_id": "c-unknown",
+        "payload": {
+          "json": {
+            "capability": "memory",
+            "provider": "reverse",
+            "turns": [],
+            "current_message": "m",
+            "token_budget": 10,
+            "thread_meta": {
+              "thread_id": "t",
+              "turn_count": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "event": "capability_provider_response",
+        "correlation_id": "c-unknown",
+        "payload": {
+          "json": {
+            "error": "capability provider \"reverse\" for capability \"memory\" is not implemented by this server"
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "capability_provider_request",
+        "correlation_id": "c-garbage",
+        "payload": {
+          "text": "{nope"
+        }
+      }
+    },
+    {
+      "expect": {
+        "event": "capability_provider_response",
+        "correlation_id": "c-garbage",
+        "payload": {
+          "json": {
+            "error": "$prefix:capability provider request payload is not valid JSON: "
+          }
+        }
+      }
+    }
+  ]
+}

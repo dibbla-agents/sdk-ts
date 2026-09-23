@@ -1,0 +1,12 @@
+{
+  "name": "api_token_over_identity",
+  "description": "An explicit SERVER_API_TOKEN wins over a present identity token file.",
+  "worker": {
+    "env": { "DIBBLA_IDENTITY_TOKEN_FILE": "${tmp}/identity-token" },
+    "files": { "identity-token": "identity-token-value" }
+  },
+  "steps": [
+    { "accept": { "metadata": { "authorization": "Bearer ${token}" } } },
+    { "include": "handshake" }
+  ]
+}

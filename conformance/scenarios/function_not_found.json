@@ -1,0 +1,34 @@
+{
+  "name": "function_not_found",
+  "description": "A request for a function this worker does not have is answered with an error event, not silence. Unknown versions of known functions count as not found.",
+  "steps": [
+    { "accept": {} },
+    { "include": "handshake" },
+    {
+      "send": {
+        "event": "function_request", "function": "missing", "version": "1.0.0",
+        "node": "node-1", "workflow": "wf-1", "run": "run-1", "correlation_id": "c-missing",
+        "payload": { "json": {} }
+      }
+    },
+    {
+      "expect": {
+        "event": "error", "text": "Function not found", "function": "missing", "version": "1.0.0",
+        "node": "node-1", "workflow": "wf-1", "run": "run-1", "correlation_id": "c-missing"
+      }
+    },
+    {
+      "send": {
+        "event": "function_request", "function": "echo", "version": "9.9.9",
+        "node": "node-1", "workflow": "wf-1", "run": "run-1", "correlation_id": "c-version",
+        "payload": { "json": {} }
+      }
+    },
+    {
+      "expect": {
+        "event": "error", "text": "Function not found", "function": "echo", "version": "9.9.9",
+        "node": "node-1", "workflow": "wf-1", "run": "run-1", "correlation_id": "c-version"
+      }
+    }
+  ]
+}

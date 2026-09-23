@@ -1,0 +1,29 @@
+{
+  "name": "status_message",
+  "description": "A status message carries the invocation's fields, including the server the request named, with the text and a JSON payload.",
+  "steps": [
+    { "accept": {} },
+    { "include": "handshake" },
+    {
+      "send": {
+        "event": "function_request", "function": "status_ping", "version": "1.0.0", "server": "engine-7",
+        "node": "node-1", "workflow": "wf-1", "run": "run-1", "correlation_id": "c-status",
+        "payload": { "json": { "text": "x" } }
+      }
+    },
+    {
+      "expect": {
+        "event": "status_message", "text": "working", "function": "status_ping", "version": "1.0.0", "server": "engine-7",
+        "node": "node-1", "workflow": "wf-1", "run": "run-1", "correlation_id": "c-status",
+        "payload": { "json": { "step": 1 } }
+      }
+    },
+    {
+      "expect": {
+        "event": "function_response", "function": "status_ping", "version": "1.0.0",
+        "node": "node-1", "workflow": "wf-1", "run": "run-1", "correlation_id": "c-status",
+        "payload": { "json": { "ok": true } }
+      }
+    }
+  ]
+}

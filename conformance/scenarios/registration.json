@@ -1,0 +1,9 @@
+{
+  "name": "registration",
+  "description": "A worker with a static API token opens one stream, presents the token and no org, and registers its functions, providers and jobs.",
+  "steps": [
+    { "accept": { "metadata": { "authorization": "Bearer ${token}", "x-org-id": null } } },
+    { "include": "handshake" },
+    { "expect_none": { "for_ms": 500 } }
+  ]
+}

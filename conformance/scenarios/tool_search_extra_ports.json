@@ -1,0 +1,92 @@
+{
+  "name": "tool_search_extra_ports",
+  "description": "Extra input ports reach a struct-shaped handler and its extra outputs come back beside the selection (DIB-449).",
+  "steps": [
+    {
+      "accept": {}
+    },
+    {
+      "include": "handshake"
+    },
+    {
+      "send": {
+        "event": "capability_provider_request",
+        "correlation_id": "c-ports",
+        "payload": {
+          "json": {
+            "capability": "tool_search",
+            "provider": "ports",
+            "query": "q",
+            "stubs": [
+              {
+                "name": "mcp__x__a"
+              },
+              {
+                "name": "plain"
+              },
+              {
+                "name": "mcp__x__b"
+              }
+            ],
+            "top_n": 5,
+            "extra_inputs": {
+              "prefix": "mcp__"
+            }
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "event": "capability_provider_response",
+        "correlation_id": "c-ports",
+        "payload": {
+          "json": {
+            "selected": [
+              "mcp__x__a",
+              "mcp__x__b"
+            ],
+            "extra_outputs": {
+              "count": 2
+            }
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "capability_provider_request",
+        "correlation_id": "c-no-ports",
+        "payload": {
+          "json": {
+            "capability": "tool_search",
+            "provider": "ports",
+            "query": "q",
+            "stubs": [
+              {
+                "name": "a"
+              }
+            ],
+            "top_n": 5
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "event": "capability_provider_response",
+        "correlation_id": "c-no-ports",
+        "payload": {
+          "json": {
+            "selected": [
+              "a"
+            ],
+            "extra_outputs": {
+              "count": 1
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "function_handler_error",
+  "description": "A handler failure becomes an error event whose text wraps the handler's message: 'Function execution failed: handler error: <message>'.",
+  "steps": [
+    { "accept": {} },
+    { "include": "handshake" },
+    {
+      "send": {
+        "event": "function_request", "function": "fail", "version": "1.0.0",
+        "node": "node-1", "workflow": "wf-1", "run": "run-1", "correlation_id": "c-fail",
+        "payload": { "json": { "text": "x" } }
+      }
+    },
+    {
+      "expect": {
+        "event": "error", "text": "Function execution failed: handler error: boom", "function": "fail", "version": "1.0.0",
+        "node": "node-1", "workflow": "wf-1", "run": "run-1", "correlation_id": "c-fail"
+      }
+    }
+  ]
+}

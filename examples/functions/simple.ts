@@ -3,7 +3,7 @@
  */
 
 import * as sdk from '../../src/index';
-import { z } from 'zod';
+import { z } from '../../src/index';
 
 // ============================================================================
 // GREETING FUNCTION

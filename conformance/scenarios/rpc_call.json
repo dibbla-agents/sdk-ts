@@ -1,0 +1,82 @@
+{
+  "name": "rpc_call",
+  "description": "A function calling another function through the RPC client sends a function_request naming the target, with calling_server set to the server the invoking request named, and resolves with the function_response on its correlation id.",
+  "steps": [
+    {
+      "accept": {}
+    },
+    {
+      "include": "handshake"
+    },
+    {
+      "send": {
+        "event": "function_request",
+        "function": "rpc_echo",
+        "version": "1.0.0",
+        "server": "engine-7",
+        "node": "node-1",
+        "workflow": "wf-1",
+        "run": "run-1",
+        "correlation_id": "c-rpc",
+        "payload": {
+          "json": {
+            "text": "ping"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "event": "function_request",
+        "function": "echo",
+        "version": "1.0.0",
+        "server": "other-worker",
+        "node": "rpc-node",
+        "workflow": "wf-1",
+        "run": "run-1",
+        "text": "Node rpc-node is invoking a function from a tool server",
+        "meta": {
+          "calling_server": "engine-7"
+        },
+        "correlation_id": "$capture:call",
+        "payload": {
+          "json": {
+            "text": "ping"
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "function_response",
+        "function": "echo",
+        "version": "1.0.0",
+        "node": "rpc-node",
+        "workflow": "wf-1",
+        "run": "run-1",
+        "correlation_id": "${call}",
+        "payload": {
+          "json": {
+            "text": "pong"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "event": "function_response",
+        "function": "rpc_echo",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-1",
+        "run": "run-1",
+        "correlation_id": "c-rpc",
+        "payload": {
+          "json": {
+            "reply": "{\"text\":\"pong\"}"
+          }
+        }
+      }
+    }
+  ]
+}
