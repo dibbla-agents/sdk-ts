@@ -18,6 +18,8 @@ import {
   HandlerContext,
 } from './internal/handlers/handlers';
 import { announceJobs, registerJobHandlers } from './internal/handlers/jobs';
+import { CapabilityRegistry, handleListCapabilityProviders, registerCapabilityHandlers } from './internal/handlers/capability';
+import { CapabilityProvider } from './providers';
 import { WorkerFunction, GlobalState, FunctionCache } from './function';
 import { JobHandler } from './jobs/types';
 import { functionKey } from './types/keys';
@@ -44,6 +46,7 @@ export class Server {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private pendingFunctions: WorkerFunction<any, any>[] = [];
   private jobs: JobHandler[] = [];
+  private capabilities = new CapabilityRegistry();
   private started = false;
   private resolveStopped: (() => void) | null = null;
 
@@ -80,6 +83,17 @@ export class Server {
     for (const fn of fns) {
       this.registerFunction(fn);
     }
+  }
+
+  /**
+   * Register a capability provider (see toolSearchProvider, memoryProvider).
+   * Must be called before start(). Throws for definitions the workflow server
+   * would reject, so a misconfigured provider fails at startup instead of
+   * never appearing.
+   */
+  registerCapabilityProvider(provider: CapabilityProvider): void {
+    if (this.started) throw new Error('registerCapabilityProvider must be called before start()');
+    this.capabilities.add(provider);
   }
 
   /**
@@ -125,6 +139,7 @@ export class Server {
     await this.registerJobs();
 
     registerHandlers(this.handlerContext);
+    registerCapabilityHandlers(this.handlerContext);
     registerJobHandlers({ ...this.handlerContext, jobs: this.jobs });
     startMessageListener(this.handlerContext);
     log.info('Stream listeners activated, server running...');
@@ -227,6 +242,7 @@ export class Server {
       oauthClient: this.oauthClient!,
       rpcClient: this.rpcClient!,
       globalState: this.globalState(),
+      capabilities: this.capabilities,
     };
   }
 
@@ -268,6 +284,7 @@ export class Server {
   /** What the worker announces on every (re)connect, in sdk-go's order. */
   private async announce(state: EventState): Promise<void> {
     await handleListFunctions(this.handlerContext!, state);
+    await handleListCapabilityProviders(this.handlerContext!, state);
   }
 
   private async registerServer(): Promise<void> {

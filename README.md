@@ -551,6 +551,62 @@ main().catch(console.error);
 
 ---
 
+### Capability Providers
+
+A capability provider replaces a built-in agent capability for the agent
+nodes that bind it. Providers are announced with your functions but never
+appear as functions.
+
+**Tool search** chooses which tools an agent gets for a query. You select from
+the offered candidates; you never add tools:
+
+```typescript
+server.registerCapabilityProvider(
+  sdk.toolSearchProvider({
+    name: 'keyword-scorer',
+    description: 'Ranks tools by keyword overlap',
+    version: '1.0.0',
+    select: (query, stubs, topN) =>
+      stubs
+        .map((s) => ({ name: s.name, score: overlap(query, `${s.name} ${s.description ?? ''}`) }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, topN)
+        .map((s) => s.name),
+  }),
+);
+```
+
+**Memory** decides which conversation history the model sees, under an
+enforced token budget. The platform keeps custody of the stored history: what
+you return is used for that one run and never written back.
+
+```typescript
+server.registerCapabilityProvider(
+  sdk.memoryProvider({
+    name: 'recent-only',
+    description: 'Keeps the last few turns',
+    version: '1.0.0',
+    maxHistoryFraction: 0.5,
+    transform: async (currentMessage, turns, tokenBudget, meta, signal) => {
+      // meta.org_id / meta.user_id are asserted by the engine: safe to
+      // partition storage on. meta.thread_id is caller-supplied: never a boundary.
+      return turns.slice(-6);
+    },
+  }),
+);
+```
+
+- Throwing fails the agent node; there is no fallback to the built-in behaviour.
+- Calls have a hard budget of about 15 seconds. When the engine abandons a call
+  (timeout, run terminated), `signal` aborts: stop work, and above all don't
+  commit side effects nobody will read.
+- To declare extra node ports, pass `extraInputsSchema` / `extraOutputsSchema`
+  and use `selectFull` / `transformFull`, which receive `extraInputs` and may
+  return `extraOutputs`. Registration fails if ports are declared with only
+  the positional handler.
+- The memory seat sends full conversation content (text, tool arguments and
+  results, reasoning) to your worker.
+
 ### Jobs
 
 Jobs are long-running work the platform triggers, such as pipeline tasks.

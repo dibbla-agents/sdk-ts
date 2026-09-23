@@ -4,7 +4,7 @@ import { JobContext } from '../../jobs/context';
 import { JobLogger } from '../../jobs/logger';
 import { Dispatcher } from '../dispatcher/dispatcher';
 import { log, errorMessage } from '../log';
-import { EventSender } from './handlers';
+import { EventSender } from './event-state';
 
 interface JobRunnerContext {
   serverName: string;

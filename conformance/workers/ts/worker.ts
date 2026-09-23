@@ -2,8 +2,7 @@
  * The sdk-ts implementation of the conformance worker profile
  * (../../PROFILE.md), run from source by the conformance runner.
  *
- * Profile parts the SDK cannot express yet are missing here; the scenarios
- * that need them are listed in ../../known-gaps.json.
+ * Scenarios this SDK does not pass yet are listed in ../../known-gaps.json.
  */
 import * as sdk from '../../../src';
 import { z } from 'zod';
@@ -155,7 +154,67 @@ server.registerJob(
   }),
 );
 
-// Not expressible in this SDK version yet: the five capability providers.
+server.registerCapabilityProvider(
+  sdk.toolSearchProvider({
+    name: 'reverse',
+    description: 'Reverse the offered stubs',
+    version: '1.0.0',
+    select: (query, stubs, topN) => {
+      if (query === 'error') throw new Error('kaboom');
+      return stubs.map((s) => s.name).reverse().slice(0, topN);
+    },
+  }),
+);
+server.registerCapabilityProvider(
+  sdk.toolSearchProvider({
+    name: 'ports',
+    description: 'Filter stubs by a wired prefix',
+    version: '1.0.0',
+    extraInputsSchema: { type: 'object', properties: { prefix: { type: 'string' } } },
+    extraOutputsSchema: { type: 'object', properties: { count: { type: 'integer' } } },
+    selectFull: ({ stubs, extraInputs }) => {
+      const prefix = typeof extraInputs.prefix === 'string' ? extraInputs.prefix : '';
+      const selected = stubs.map((s) => s.name).filter((name) => name.startsWith(prefix));
+      return { selected, extraOutputs: { count: selected.length } };
+    },
+  }),
+);
+server.registerCapabilityProvider(
+  sdk.toolSearchProvider({ name: 'inert', description: 'Registered without a handler', version: '1.0.0' }),
+);
+server.registerCapabilityProvider(
+  sdk.memoryProvider({
+    name: 'marker',
+    description: 'Inject a marker turn and the last turn',
+    version: '1.0.0',
+    maxHistoryFraction: 0.5,
+    extraInputsSchema: { type: 'object', properties: { note: { type: 'string' } } },
+    transformFull: ({ currentMessage, turns, tokenBudget, meta, extraInputs }) => {
+      const summary =
+        `[marker msg=${currentMessage} org=${meta.org_id ?? ''} user=${meta.user_id ?? 'none'} ` +
+        `budget=${tokenBudget} turns=${turns.length}]`;
+      const out: sdk.Turn[] = [
+        { id: 'marker', role: 'assistant', date: '2026-01-01T00:00:00Z', parts: [{ type: 'text', text: { text: summary } }] },
+      ];
+      if (turns.length > 0) out.push(turns[turns.length - 1]);
+      return {
+        turns: out,
+        extraOutputs: typeof extraInputs.note === 'string' ? { note: extraInputs.note } : undefined,
+      };
+    },
+  }),
+);
+server.registerCapabilityProvider(
+  sdk.memoryProvider({
+    name: 'blocking',
+    description: 'Block until the call is cancelled',
+    version: '1.0.0',
+    transform: (_message, _turns, _budget, _meta, signal) =>
+      new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      }),
+  }),
+);
 
 server.start().catch((err) => {
   console.error(err);

@@ -7,6 +7,7 @@ import { GrpcCacheClient } from '../src/internal/cache/cache-client';
 import { GrpcStoreClient } from '../src/internal/store/store-client';
 import { GrpcOAuthClient } from '../src/internal/oauth/oauth-client';
 import { RpcClient } from '../src/internal/rpc/rpc-client';
+import { CapabilityRegistry } from '../src/internal/handlers/capability';
 import { newSimpleFunction, WorkerFunction } from '../src/function';
 import { functionKey } from '../src/types/keys';
 import { EventMessage, createEmptyEventMessage } from '../src/types/events';
@@ -55,6 +56,7 @@ function setup(fns: AnyFunction[], concurrency = 8, queue = 100) {
     oauthClient: new GrpcOAuthClient(sender, 'w'),
     rpcClient: new RpcClient(sender, 'w'),
     globalState: { serverName: 'w', cache: null, store: null, oauth: null, rpc: null },
+    capabilities: new CapabilityRegistry(),
   };
   registerHandlers(ctx);
   startMessageListener(ctx);

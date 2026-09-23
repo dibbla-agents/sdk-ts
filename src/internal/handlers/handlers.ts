@@ -7,67 +7,10 @@ import { GrpcStoreClient } from '../store/store-client';
 import { GrpcOAuthClient } from '../oauth/oauth-client';
 import { RpcClient } from '../rpc/rpc-client';
 import { log, errorMessage } from '../log';
+import { CapabilityRegistry, handleListCapabilityProviders, sendCapabilityErrorResponse } from './capability';
+import { EventSender, EventState, createEventState } from './event-state';
 
-/**
- * The invocation fields a reply carries back: what the request named, plus
- * the name this worker serves functions under.
- */
-export interface EventState {
-  server: string;
-  function: string;
-  functionServer: string;
-  node: string;
-  workflow: string;
-  version: string;
-  run: string;
-  correlationId: string;
-}
-
-export function createEventState(message: EventMessage, functionServer: string): EventState {
-  return {
-    server: message.server,
-    function: message.function,
-    functionServer,
-    node: message.node,
-    workflow: message.workflow,
-    version: message.version,
-    run: message.run,
-    correlationId: message.correlationId,
-  };
-}
-
-/** The pseudo-invocation the registration after connect is correlated with. */
-export function startupEventState(serverName: string): EventState {
-  return {
-    server: serverName,
-    function: '',
-    functionServer: serverName,
-    node: '',
-    workflow: '',
-    version: '',
-    run: '',
-    correlationId: 'startup',
-  };
-}
-
-/** The pseudo-invocation of the startup broadcast. */
-export function startupBroadcastEventState(serverName: string): EventState {
-  return {
-    server: serverName,
-    function: 'startup',
-    functionServer: serverName,
-    node: 'startup',
-    workflow: 'startup',
-    version: '1.0',
-    run: 'startup',
-    correlationId: 'startup',
-  };
-}
-
-export interface EventSender {
-  sendEvent(event: EventMessage): Promise<void>;
-  setMessageHandler(handler: (message: EventMessage) => void): void;
-}
+export { EventSender, EventState, createEventState, startupEventState, startupBroadcastEventState } from './event-state';
 
 /**
  * HandlerContext contains all the services needed by handlers.
@@ -83,6 +26,7 @@ export interface HandlerContext {
   oauthClient: GrpcOAuthClient;
   rpcClient: RpcClient;
   globalState: GlobalState;
+  capabilities: CapabilityRegistry;
 }
 
 /**
@@ -209,6 +153,7 @@ export function registerHandlers(ctx: HandlerContext): void {
     const state = createEventState(message, ctx.serverName);
     await handleServerName(ctx, state);
     await handleListFunctions(ctx, state);
+    await handleListCapabilityProviders(ctx, state);
   });
 }
 
@@ -232,6 +177,14 @@ export function startMessageListener(ctx: HandlerContext): void {
     log.warn(`Dispatcher queue full, dropping event: ${message.event} (workflow: ${message.workflow})`);
     if (message.event === Events.FunctionRequest) {
       void sendErrorEvent(ctx, createEventState(message, ctx.serverName), 'Worker overloaded: dispatcher queue full, request dropped');
+    } else if (message.event === Events.CapabilityProviderRequest) {
+      // On the seat's response channel, so the engine's call resolves with a
+      // coded failure instead of timing out.
+      void sendCapabilityErrorResponse(
+        ctx,
+        createEventState(message, ctx.serverName),
+        'worker overloaded: dispatcher queue full, capability provider request dropped',
+      );
     }
   });
 }

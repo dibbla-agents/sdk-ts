@@ -60,6 +60,30 @@ export {
   z,
 } from './function';
 
+// Capability providers
+export {
+  Capability,
+  ProviderStub,
+  SelectRequest,
+  SelectResponse,
+  ToolSearchProviderOptions,
+  PartType,
+  TextPart,
+  ToolCallPart,
+  AttachmentPart,
+  ReasoningPart,
+  Part,
+  Turn,
+  ThreadMeta,
+  TransformRequest,
+  TransformResponse,
+  MemoryProviderOptions,
+  CapabilityProviderDefinition,
+  CapabilityProvider,
+  toolSearchProvider,
+  memoryProvider,
+} from './providers';
+
 // Jobs
 export {
   JobStatus,
