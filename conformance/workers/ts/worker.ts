@@ -4,9 +4,21 @@
  *
  * Scenarios this SDK does not pass yet are listed in ../../known-gaps.json.
  */
-import * as sdk from '../../../src';
-import { z } from 'zod';
+import type * as Sdk from '../../../src';
+import { pathToFileURL } from 'node:url';
 
+/**
+ * The SDK under test: this repository's source, or (CONFORMANCE_SDK_LOADER)
+ * a loader module that requires or imports the packed package.
+ */
+async function loadSdk(): Promise<typeof Sdk> {
+  const loader = process.env.CONFORMANCE_SDK_LOADER;
+  if (!loader) return require('../../../src');
+  return loader.endsWith('.mjs') ? import(pathToFileURL(loader).href) : require(loader);
+}
+
+async function main(sdk: typeof Sdk): Promise<void> {
+const { z } = sdk;
 const pingInterval = Number(process.env.CONFORMANCE_PING_INTERVAL_SEC ?? '0');
 
 const server = sdk.create({ pingIntervalSec: pingInterval });
@@ -220,7 +232,7 @@ server.registerCapabilityProvider(
       const summary =
         `[marker msg=${currentMessage} org=${meta.org_id ?? ''} user=${meta.user_id ?? 'none'} ` +
         `budget=${tokenBudget} turns=${turns.length}]`;
-      const out: sdk.Turn[] = [
+      const out: Sdk.Turn[] = [
         { id: 'marker', role: 'assistant', date: '2026-01-01T00:00:00Z', parts: [{ type: 'text', text: { text: summary } }] },
       ];
       if (turns.length > 0) out.push(turns[turns.length - 1]);
@@ -243,7 +255,12 @@ server.registerCapabilityProvider(
   }),
 );
 
-server.start().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+await server.start();
+}
+
+loadSdk()
+  .then(main)
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });

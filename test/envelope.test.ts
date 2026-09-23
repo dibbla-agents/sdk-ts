@@ -68,3 +68,11 @@ describe('envelope', () => {
     assert.throws(() => toGrpc({ ...base, meta: { f: () => 1 } }), /cannot be sent in a protobuf Struct/);
   });
 });
+
+describe('embedded proto', () => {
+  it('is the reference events.proto, which is sdk-go\'s', async () => {
+    const { EVENTS_PROTO } = await import('../src/internal/grpc/proto');
+    const reference = (await import('node:fs')).readFileSync(path.join(__dirname, '../src/proto/events.proto'), 'utf8');
+    assert.equal(EVENTS_PROTO.trim(), reference.trim());
+  });
+});

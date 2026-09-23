@@ -26,7 +26,7 @@ async function main() {
   });
 
   // Register all functions from the functions module
-  functions.all.forEach(fn => server.registerFunction(fn));
+  server.registerFunctions(functions.all);
 
   console.log(`Starting worker with ${functions.all.length} functions...`);
   await server.start();

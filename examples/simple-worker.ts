@@ -14,7 +14,7 @@
 
 import 'dotenv/config';
 import * as sdk from '../src/index';
-import { z } from 'zod';
+import { z } from '../src/index';
 
 // Define input/output schemas with Zod
 const GreetingInput = z.object({

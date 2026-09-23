@@ -14,7 +14,7 @@
  */
 
 import * as sdk from '../src/index';
-import { z } from 'zod';
+import { z } from '../src/index';
 
 // Define schemas for a function that demonstrates status messages
 const LongRunningTaskInput = z.object({

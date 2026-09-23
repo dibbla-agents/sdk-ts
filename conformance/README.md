@@ -32,12 +32,19 @@ npm run conformance:go     # sdk-go at the version in workers/go/go.mod (needs G
 
 SDK_GO_DIR=../sdk-go npm run conformance:go   # sdk-go from a local checkout
 CONFORMANCE_ONLY=reconnect,store npm run conformance   # a subset
+
+npm run build && npm run conformance:packed   # this SDK as published (require and import)
 ```
 
 `conformance:go` builds the Go worker once per run. `SDK_GO_DIR` builds it
 against a local checkout through a temporary modfile, without touching the
 committed `go.mod`. That is how sdk-go's CI can run these fixtures against its
 own HEAD.
+
+`conformance:packed` packs the built package, installs the tarball into a
+scratch project, and runs the TS worker against it twice: once loaded with
+`require` and once with `import`. That tests the `files` list, the `exports`
+map and both builds, which running from source cannot.
 
 ## Known gaps
 

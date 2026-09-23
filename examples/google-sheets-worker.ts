@@ -16,7 +16,7 @@
  */
 
 import * as sdk from '../src/index';
-import { z } from 'zod';
+import { z } from '../src/index';
 
 // ============================================================================
 // READ GOOGLE SHEETS
@@ -65,6 +65,27 @@ const UpdateGoogleSheetsOutput = z.object({
 /**
  * Parse spreadsheet ID from a Google Sheets URL
  */
+// ============================================================================
+// Google Sheets API response shapes (only the fields used here)
+// ============================================================================
+
+interface SheetValuesResponse {
+  values?: string[][];
+}
+
+interface SpreadsheetMetadata {
+  properties: { title: string };
+  sheets: Array<{ properties: { title: string } }>;
+}
+
+interface UpdateValuesResponse {
+  updatedRange: string;
+  updatedRows: number;
+  updatedColumns: number;
+  updatedCells: number;
+  spreadsheetId: string;
+}
+
 function parseSpreadsheetId(sheetsUrl: string): string {
   const url = new URL(sheetsUrl);
   
@@ -96,7 +117,7 @@ function colIndexToLetter(col: number): string {
 /**
  * Fetch spreadsheet metadata (title and sheet names)
  */
-async function getSpreadsheetMetadata(accessToken: string, spreadsheetId: string) {
+async function getSpreadsheetMetadata(accessToken: string, spreadsheetId: string): Promise<SpreadsheetMetadata> {
   const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`;
   
   const response = await fetch(apiUrl, {
@@ -110,7 +131,7 @@ async function getSpreadsheetMetadata(accessToken: string, spreadsheetId: string
     throw new Error(`API request failed with status ${response.status}: ${body}`);
   }
   
-  return response.json();
+  return response.json() as Promise<SpreadsheetMetadata>;
 }
 
 /**
@@ -135,7 +156,7 @@ async function getSheetValuesAsJson(
     throw new Error(`API request failed with status ${response.status}: ${body}`);
   }
   
-  const data = await response.json();
+  const data = (await response.json()) as SheetValuesResponse;
   const values: string[][] = data.values || [];
   
   // Convert 2D array to a map with A1 notation keys
@@ -192,7 +213,7 @@ async function updateSheetValues(
     throw new Error(`API request failed with status ${response.status}: ${body}`);
   }
   
-  return response.json();
+  return response.json() as Promise<UpdateValuesResponse>;
 }
 
 // ============================================================================

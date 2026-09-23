@@ -1,9 +1,8 @@
 import * as grpc from '@grpc/grpc-js';
-import * as protoLoader from '@grpc/proto-loader';
-import * as path from 'path';
 import { EventMessage, Events } from '../../types/events';
 import { log, errorMessage } from '../log';
 import { GrpcEventMessage, fromGrpc, toGrpc } from './envelope';
+import { eventService } from './proto';
 import { DEFAULT_IDENTITY_TOKEN_PATH, TokenProvider } from './token-provider';
 
 /**
@@ -80,25 +79,6 @@ export function jitter(ms: number): number {
   if (ms <= 1) return ms;
   const half = ms / 2;
   return half + Math.random() * half;
-}
-
-let eventServiceCtor: grpc.ServiceClientConstructor | undefined;
-
-function eventService(): grpc.ServiceClientConstructor {
-  if (!eventServiceCtor) {
-    const definition = protoLoader.loadSync(path.join(__dirname, '../../proto/events.proto'), {
-      keepCase: true,
-      longs: String,
-      enums: String,
-      defaults: false,
-      oneofs: true,
-    });
-    const proto = grpc.loadPackageDefinition(definition) as unknown as {
-      workflows: { EventService: grpc.ServiceClientConstructor };
-    };
-    eventServiceCtor = proto.workflows.EventService;
-  }
-  return eventServiceCtor;
 }
 
 type EventStream = grpc.ClientDuplexStream<GrpcEventMessage, GrpcEventMessage>;
@@ -282,7 +262,12 @@ export class GrpcCommunicator {
       let died = false;
       let cause: Error | undefined;
 
-      const conn = await this.attemptConnection();
+      // Nothing a connection attempt throws may end the supervisor: a worker
+      // that stops reconnecting is worse than one that logs and retries.
+      const conn = await this.attemptConnection().catch((err) => {
+        log.error(`Connection attempt failed unexpectedly: ${errorMessage(err)}`);
+        return null;
+      });
       if (conn) {
         const connectedAt = Date.now();
         cause = await this.supervise(conn);

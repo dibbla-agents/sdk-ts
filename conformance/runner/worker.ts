@@ -19,6 +19,8 @@ export interface WorkerLauncher {
   /** One-time build step before any scenario runs. */
   prepare(): Promise<void>;
   command(): { cmd: string; args: string[] };
+  /** Extra environment for the worker process. */
+  env?(): Record<string, string>;
 }
 
 /**
@@ -54,17 +56,43 @@ class GoWorker implements WorkerLauncher {
   }
 }
 
-/** The TypeScript worker, run from source against this repository's SDK. */
+/**
+ * The TypeScript worker. By default it runs against this repository's SDK
+ * source. CONFORMANCE_TS_SDK=packed-cjs or packed-esm instead packs the SDK
+ * (npm pack of the current build), installs the tarball into a scratch
+ * project and loads it through require or import: the package exactly as
+ * users get it, exports map and files list included.
+ */
 class TsWorker implements WorkerLauncher {
   kind: WorkerKind = 'ts';
+  private loader = '';
 
-  async prepare(): Promise<void> {}
+  async prepare(): Promise<void> {
+    const mode = process.env.CONFORMANCE_TS_SDK ?? 'source';
+    if (mode === 'source') return;
+    if (mode !== 'packed-cjs' && mode !== 'packed-esm') {
+      throw new Error(`CONFORMANCE_TS_SDK=${mode}: want source, packed-cjs or packed-esm`);
+    }
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), 'conformance-packed-'));
+    const { stdout } = await execFileAsync('npm', ['pack', '--silent', '--pack-destination', project], { cwd: REPO_DIR });
+    const tarball = path.join(project, stdout.trim().split('\n').pop()!);
+    fs.writeFileSync(path.join(project, 'package.json'), '{"name":"conformance-packed","private":true}');
+    await execFileAsync('npm', ['install', '--silent', '--no-audit', '--no-fund', tarball], { cwd: project });
+    // Resolved from inside the project, so Node applies the package's exports map.
+    fs.writeFileSync(path.join(project, 'load.cjs'), "module.exports = require('@dibbla-agents/sdk-ts');\n");
+    fs.writeFileSync(path.join(project, 'load.mjs'), "export * from '@dibbla-agents/sdk-ts';\n");
+    this.loader = path.join(project, mode === 'packed-cjs' ? 'load.cjs' : 'load.mjs');
+  }
 
   command() {
     return {
       cmd: process.execPath,
       args: ['--import', require.resolve('tsx'), path.join(CONFORMANCE_DIR, 'workers', 'ts', 'worker.ts')],
     };
+  }
+
+  env(): Record<string, string> {
+    return this.loader ? { CONFORMANCE_SDK_LOADER: this.loader } : {};
   }
 }
 
@@ -93,6 +121,7 @@ export class WorkerProcess {
         // Only what a process needs to run; nothing that could change SDK behaviour.
         PATH: process.env.PATH ?? '',
         HOME: process.env.HOME ?? cwd,
+        ...launcher.env?.(),
         ...env,
       },
       stdio: ['pipe', 'pipe', 'pipe'],

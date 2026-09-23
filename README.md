@@ -13,7 +13,8 @@ This SDK mirrors the Go SDK with idiomatic TypeScript patterns:
 
 ### Prerequisites
 
-- Node.js 18.0.0 or later
+- Node.js 20 or later. This is a server-side worker SDK built on
+  `@grpc/grpc-js`; it does not run in browsers.
 - Access to a gRPC workflow server
 
 ### Installation
@@ -22,13 +23,17 @@ This SDK mirrors the Go SDK with idiomatic TypeScript patterns:
 npm install @dibbla-agents/sdk-ts
 ```
 
+The package ships CommonJS and ES modules with type declarations. Define
+schemas with the `z` it re-exports: the SDK reads Zod 3 schemas to publish
+your functions' types, and `npm install zod` would give you Zod 4.
+
 ### Example Usage
 
 Create a simple worker with custom functions:
 
 ```typescript
 import * as sdk from '@dibbla-agents/sdk-ts';
-import { z } from 'zod';
+import { z } from '@dibbla-agents/sdk-ts';
 
 // Define input/output schemas with Zod
 const GreetingInput = z.object({
@@ -65,7 +70,7 @@ async function main() {
   // Or register multiple functions at once:
   // server.registerFunctions([greetingFn, otherFn, anotherFn]);
 
-  // Start server (blocks forever)
+  // Start the worker: runs until server.stop()
   console.log('Starting worker...');
   await server.start();
 }
@@ -309,7 +314,7 @@ Start by defining the input and output schemas with Zod:
 
 ```typescript
 import * as sdk from '@dibbla-agents/sdk-ts';
-import { z } from 'zod';
+import { z } from '@dibbla-agents/sdk-ts';
 
 // Input: just the Google Sheets URL
 const ReadSheetsInput = z.object({
@@ -468,7 +473,7 @@ Each module exports its function definitions:
 
 ```typescript
 import * as sdk from '@dibbla-agents/sdk-ts';
-import { z } from 'zod';
+import { z } from '@dibbla-agents/sdk-ts';
 
 const ReadSheetsInput = z.object({
   url: z.string(),
