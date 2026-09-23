@@ -61,7 +61,9 @@ class GoWorker implements WorkerLauncher {
  * source. CONFORMANCE_TS_SDK=packed-cjs or packed-esm instead packs the SDK
  * (npm pack of the current build), installs the tarball into a scratch
  * project and loads it through require or import: the package exactly as
- * users get it, exports map and files list included.
+ * users get it, exports map and files list included. registry-cjs and
+ * registry-esm do the same with the version published on npm
+ * (CONFORMANCE_TS_VERSION, default latest).
  */
 class TsWorker implements WorkerLauncher {
   kind: WorkerKind = 'ts';
@@ -70,18 +72,25 @@ class TsWorker implements WorkerLauncher {
   async prepare(): Promise<void> {
     const mode = process.env.CONFORMANCE_TS_SDK ?? 'source';
     if (mode === 'source') return;
-    if (mode !== 'packed-cjs' && mode !== 'packed-esm') {
-      throw new Error(`CONFORMANCE_TS_SDK=${mode}: want source, packed-cjs or packed-esm`);
+    const [origin, format] = mode.split('-');
+    if (!['packed', 'registry'].includes(origin) || !['cjs', 'esm'].includes(format)) {
+      throw new Error(`CONFORMANCE_TS_SDK=${mode}: want source, packed-cjs, packed-esm, registry-cjs or registry-esm`);
     }
-    const project = fs.mkdtempSync(path.join(os.tmpdir(), 'conformance-packed-'));
-    const { stdout } = await execFileAsync('npm', ['pack', '--silent', '--pack-destination', project], { cwd: REPO_DIR });
-    const tarball = path.join(project, stdout.trim().split('\n').pop()!);
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), `conformance-${origin}-`));
     fs.writeFileSync(path.join(project, 'package.json'), '{"name":"conformance-packed","private":true}');
-    await execFileAsync('npm', ['install', '--silent', '--no-audit', '--no-fund', tarball], { cwd: project });
+    let spec: string;
+    if (origin === 'packed') {
+      const { stdout } = await execFileAsync('npm', ['pack', '--silent', '--pack-destination', project], { cwd: REPO_DIR });
+      spec = path.join(project, stdout.trim().split('\n').pop()!);
+    } else {
+      // The published package: CONFORMANCE_TS_VERSION (default: latest).
+      spec = `@dibbla/sdk-ts@${process.env.CONFORMANCE_TS_VERSION || 'latest'}`;
+    }
+    await execFileAsync('npm', ['install', '--silent', '--no-audit', '--no-fund', spec], { cwd: project });
     // Resolved from inside the project, so Node applies the package's exports map.
     fs.writeFileSync(path.join(project, 'load.cjs'), "module.exports = require('@dibbla/sdk-ts');\n");
     fs.writeFileSync(path.join(project, 'load.mjs'), "export * from '@dibbla/sdk-ts';\n");
-    this.loader = path.join(project, mode === 'packed-cjs' ? 'load.cjs' : 'load.mjs');
+    this.loader = path.join(project, format === 'cjs' ? 'load.cjs' : 'load.mjs');
   }
 
   command() {
