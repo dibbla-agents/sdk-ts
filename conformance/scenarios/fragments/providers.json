@@ -1,0 +1,51 @@
+[
+  {
+    "capability": "tool_search",
+    "name": "reverse",
+    "description": "Reverse the offered stubs",
+    "version": "1.0.0",
+    "server": "${worker}",
+    "contract_version": 1,
+    "wants_catalog_sync": false
+  },
+  {
+    "capability": "tool_search",
+    "name": "ports",
+    "description": "Filter stubs by a wired prefix",
+    "version": "1.0.0",
+    "server": "${worker}",
+    "contract_version": 1,
+    "extra_inputs_schema": { "type": "object", "properties": { "prefix": { "type": "string" } } },
+    "extra_outputs_schema": { "type": "object", "properties": { "count": { "type": "integer" } } },
+    "wants_catalog_sync": false
+  },
+  {
+    "capability": "tool_search",
+    "name": "inert",
+    "description": "Registered without a handler",
+    "version": "1.0.0",
+    "server": "${worker}",
+    "contract_version": 1,
+    "wants_catalog_sync": false
+  },
+  {
+    "capability": "memory",
+    "name": "marker",
+    "description": "Inject a marker turn and the last turn",
+    "version": "1.0.0",
+    "server": "${worker}",
+    "contract_version": 1,
+    "extra_inputs_schema": { "type": "object", "properties": { "note": { "type": "string" } } },
+    "wants_catalog_sync": false,
+    "max_history_fraction": 0.5
+  },
+  {
+    "capability": "memory",
+    "name": "blocking",
+    "description": "Block until the call is cancelled",
+    "version": "1.0.0",
+    "server": "${worker}",
+    "contract_version": 1,
+    "wants_catalog_sync": false
+  }
+]

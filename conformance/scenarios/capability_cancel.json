@@ -1,0 +1,81 @@
+{
+  "name": "capability_cancel",
+  "description": "capability_provider_cancel (DIB-443) cancels the in-flight handler for its correlation id. A handler that stops on cancellation still answers, with its error.",
+  "steps": [
+    {
+      "accept": {}
+    },
+    {
+      "include": "handshake"
+    },
+    {
+      "send": {
+        "event": "capability_provider_request",
+        "correlation_id": "c-block",
+        "payload": {
+          "json": {
+            "capability": "memory",
+            "provider": "blocking",
+            "turns": [],
+            "current_message": "m",
+            "token_budget": 10,
+            "thread_meta": {
+              "thread_id": "t",
+              "turn_count": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "expect_none": {
+        "for_ms": 500
+      }
+    },
+    {
+      "send": {
+        "event": "capability_provider_cancel",
+        "correlation_id": "c-block"
+      }
+    },
+    {
+      "expect": {
+        "event": "capability_provider_response",
+        "correlation_id": "c-block",
+        "payload": {
+          "json": {
+            "error": "$nonempty"
+          }
+        }
+      }
+    },
+    {
+      "comment": "A cancel for an unknown call is harmless."
+    },
+    {
+      "send": {
+        "event": "capability_provider_cancel",
+        "correlation_id": "c-unknown"
+      }
+    },
+    {
+      "send": {
+        "event": "request_server_name",
+        "correlation_id": "c-barrier"
+      }
+    },
+    {
+      "expect": {
+        "server": "${worker}",
+        "event": "response_server_name",
+        "text": "${worker}",
+        "correlation_id": "c-barrier"
+      }
+    },
+    {
+      "expect_none": {
+        "for_ms": 500
+      }
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "$unordered": [
+    {
+      "name": "echo",
+      "description": "Echo the input back",
+      "version": "1.0.0",
+      "inputs_type": { "$fragment": "echo_schema" },
+      "outputs_type": { "$fragment": "echo_schema" },
+      "server": "${worker}",
+      "tags": ["conformance"]
+    },
+    {
+      "name": "fail",
+      "description": "Always fails",
+      "version": "1.0.0",
+      "inputs_type": { "$json": { "text": "string" } },
+      "outputs_type": { "$json": { "text": "string" } },
+      "server": "${worker}",
+      "tags": []
+    },
+    {
+      "name": "whoami",
+      "description": "Report the verified caller",
+      "version": "1.0.0",
+      "inputs_type": { "$json": { "query": "string" } },
+      "outputs_type": {
+        "$json": {
+          "present": "bool",
+          "is_user": "bool",
+          "identity": "string",
+          "user_id": "string",
+          "email": "string",
+          "name": "string",
+          "org_id": "string",
+          "org_role": "string"
+        }
+      },
+      "server": "${worker}",
+      "tags": []
+    },
+    {
+      "name": "cached_upper",
+      "description": "Upper-case with a 60s cache",
+      "version": "1.0.0",
+      "inputs_type": { "$json": { "text": "string" } },
+      "outputs_type": { "$json": { "text": "string" } },
+      "server": "${worker}",
+      "tags": []
+    },
+    {
+      "name": "store_append",
+      "description": "Append to a per-workflow history",
+      "version": "1.0.0",
+      "inputs_type": { "$json": { "text": "string" } },
+      "outputs_type": { "$json": { "history": "[]string" } },
+      "server": "${worker}",
+      "tags": []
+    },
+    {
+      "name": "oauth_token",
+      "description": "Fetch a Google access token",
+      "version": "1.0.0",
+      "inputs_type": { "$json": { "text": "string" } },
+      "outputs_type": { "$json": { "access_token": "string", "token_type": "string", "provider": "string" } },
+      "server": "${worker}",
+      "tags": []
+    },
+    {
+      "name": "status_ping",
+      "description": "Send a status message",
+      "version": "1.0.0",
+      "inputs_type": { "$json": { "text": "string" } },
+      "outputs_type": { "$json": { "ok": "bool" } },
+      "server": "${worker}",
+      "tags": []
+    }
+  ]
+}

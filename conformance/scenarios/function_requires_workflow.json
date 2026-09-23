@@ -1,0 +1,18 @@
+{
+  "name": "function_requires_workflow",
+  "description": "A function_request without a workflow is dropped without a reply. A later discovery request is still answered, and nothing else arrives.",
+  "steps": [
+    { "accept": {} },
+    { "include": "handshake" },
+    {
+      "send": {
+        "event": "function_request", "function": "echo", "version": "1.0.0",
+        "node": "node-1", "run": "run-1", "correlation_id": "c-no-workflow",
+        "payload": { "json": { "text": "x" } }
+      }
+    },
+    { "send": { "event": "request_server_name", "correlation_id": "c-barrier" } },
+    { "expect": { "server": "${worker}", "event": "response_server_name", "text": "${worker}", "correlation_id": "c-barrier" } },
+    { "expect_none": { "for_ms": 1000 } }
+  ]
+}

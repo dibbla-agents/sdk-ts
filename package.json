@@ -13,8 +13,10 @@
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run clean && npm run build",
     "dev": "tsc --watch",
-    "lint": "eslint src --ext .ts",
-    "test": "node --test"
+    "typecheck": "tsc --noEmit -p tsconfig.check.json",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "conformance": "CONFORMANCE_WORKER=ts node --import tsx --test conformance/conformance.test.ts",
+    "conformance:go": "CONFORMANCE_WORKER=go node --import tsx --test conformance/conformance.test.ts"
   },
   "keywords": [
     "dibbla",
@@ -36,6 +38,7 @@
     "@types/murmurhash3js": "^3.0.3",
     "@types/node": "^20.0.0",
     "ts-node": "^10.9.2",
+    "tsx": "^4.23.15",
     "typescript": "^5.3.0"
   },
   "engines": {

@@ -1,0 +1,36 @@
+{
+  "name": "store",
+  "description": "Store get/set travel on the stream scoped to a workflow: the get waits for store_get_response on its correlation id, the set is fire-and-forget.",
+  "steps": [
+    { "accept": {} },
+    { "include": "handshake" },
+    {
+      "send": {
+        "event": "function_request", "function": "store_append", "version": "1.0.0",
+        "node": "node-1", "workflow": "wf-1", "run": "run-1", "correlation_id": "c-store",
+        "payload": { "json": { "text": "two" } }
+      }
+    },
+    {
+      "expect": {
+        "workflow": "wf-1", "event": "store_get_request", "text": "Store get request", "correlation_id": "$capture:get",
+        "meta": { "Workflow": "wf-1", "Key": "history", "calling_server": "${worker}" }
+      }
+    },
+    { "send": { "event": "store_get_response", "correlation_id": "${get}", "payload": { "json": ["one"] } } },
+    {
+      "expect": {
+        "workflow": "wf-1", "event": "store_set_request", "text": "Store set request", "correlation_id": "$nonempty",
+        "meta": { "Workflow": "wf-1", "Key": "history", "calling_server": "${worker}" },
+        "payload": { "json": ["one", "two"] }
+      }
+    },
+    {
+      "expect": {
+        "event": "function_response", "function": "store_append", "version": "1.0.0",
+        "node": "node-1", "workflow": "wf-1", "run": "run-1", "correlation_id": "c-store",
+        "payload": { "json": { "history": ["one", "two"] } }
+      }
+    }
+  ]
+}

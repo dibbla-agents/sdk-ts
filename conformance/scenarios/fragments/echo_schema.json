@@ -1,0 +1,14 @@
+{
+  "$json": {
+    "text": "string",
+    "count": "int",
+    "ratio": "float64",
+    "flag": "bool",
+    "tags": "[]string",
+    "items": "$regex:^\\[\\][A-Za-z_][A-Za-z0-9_.]*$",
+    "items[].name": "string",
+    "items[].qty": "int",
+    "attrs[map]": "map[string]string",
+    "nested.inner": "string"
+  }
+}

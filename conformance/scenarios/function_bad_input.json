@@ -1,0 +1,21 @@
+{
+  "name": "function_bad_input",
+  "description": "A payload that cannot be decoded is an error event. The decoder's own message is language-specific, so only the prefix is pinned.",
+  "steps": [
+    { "accept": {} },
+    { "include": "handshake" },
+    {
+      "send": {
+        "event": "function_request", "function": "echo", "version": "1.0.0",
+        "node": "node-1", "workflow": "wf-1", "run": "run-1", "correlation_id": "c-bad",
+        "payload": { "text": "{not json" }
+      }
+    },
+    {
+      "expect": {
+        "event": "error", "text": "$prefix:Function execution failed: failed to unmarshal input: ", "function": "echo", "version": "1.0.0",
+        "node": "node-1", "workflow": "wf-1", "run": "run-1", "correlation_id": "c-bad"
+      }
+    }
+  ]
+}

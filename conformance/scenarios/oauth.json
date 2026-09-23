@@ -1,0 +1,60 @@
+{
+  "name": "oauth",
+  "description": "An OAuth token request names the provider and run; the response payload is the token. An oauth_error on the same correlation id fails the call with the server's code and message.",
+  "steps": [
+    { "accept": {} },
+    { "include": "handshake" },
+    {
+      "send": {
+        "event": "function_request", "function": "oauth_token", "version": "1.0.0",
+        "node": "node-1", "workflow": "wf-1", "run": "run-1", "correlation_id": "c-token",
+        "payload": { "json": { "text": "x" } }
+      }
+    },
+    {
+      "expect": {
+        "event": "oauth_token_request", "text": "OAuth token request", "run": "run-1", "correlation_id": "$capture:req1",
+        "payload": { "json": { "provider": "google", "run_id": "run-1" } }
+      }
+    },
+    {
+      "send": {
+        "event": "oauth_token_response", "correlation_id": "${req1}",
+        "payload": { "json": { "access_token": "ya29.token", "token_type": "Bearer", "expires_at": 1790000000, "provider": "google" } }
+      }
+    },
+    {
+      "expect": {
+        "event": "function_response", "function": "oauth_token", "version": "1.0.0",
+        "node": "node-1", "workflow": "wf-1", "run": "run-1", "correlation_id": "c-token",
+        "payload": { "json": { "access_token": "ya29.token", "token_type": "Bearer", "provider": "google" } }
+      }
+    },
+    {
+      "send": {
+        "event": "function_request", "function": "oauth_token", "version": "1.0.0",
+        "node": "node-1", "workflow": "wf-1", "run": "run-2", "correlation_id": "c-denied",
+        "payload": { "json": { "text": "x" } }
+      }
+    },
+    {
+      "expect": {
+        "event": "oauth_token_request", "text": "OAuth token request", "run": "run-2", "correlation_id": "$capture:req2",
+        "payload": { "json": { "provider": "google", "run_id": "run-2" } }
+      }
+    },
+    {
+      "send": {
+        "event": "oauth_error", "correlation_id": "${req2}",
+        "payload": { "json": { "error": "not_connected", "error_message": "Google is not connected" } }
+      }
+    },
+    {
+      "expect": {
+        "event": "error", "function": "oauth_token", "version": "1.0.0",
+        "node": "node-1", "workflow": "wf-1", "run": "run-2", "correlation_id": "c-denied",
+        "text": "Function execution failed: handler error: oauth error [not_connected]: Google is not connected"
+      }
+    }
+  ]
+}

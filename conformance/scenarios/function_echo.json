@@ -1,0 +1,55 @@
+{
+  "name": "function_echo",
+  "description": "A function_request runs the function and answers with function_response carrying the invocation fields back, the output as the JSON payload, and no server or text.",
+  "steps": [
+    { "accept": {} },
+    { "include": "handshake" },
+    {
+      "send": {
+        "event": "function_request",
+        "function": "echo",
+        "version": "1.0.0",
+        "server": "${worker}",
+        "node": "node-1",
+        "workflow": "wf-1",
+        "run": "run-1",
+        "correlation_id": "c-echo",
+        "payload": {
+          "json": {
+            "text": "hello",
+            "count": 3,
+            "ratio": 0.25,
+            "flag": true,
+            "tags": ["a", "b"],
+            "items": [{ "name": "x", "qty": 2 }, { "name": "y", "qty": 0 }],
+            "attrs": { "k": "v" },
+            "nested": { "inner": "deep" }
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "event": "function_response",
+        "function": "echo",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-1",
+        "run": "run-1",
+        "correlation_id": "c-echo",
+        "payload": {
+          "json": {
+            "text": "hello",
+            "count": 3,
+            "ratio": 0.25,
+            "flag": true,
+            "tags": ["a", "b"],
+            "items": [{ "name": "x", "qty": 2 }, { "name": "y", "qty": 0 }],
+            "attrs": { "k": "v" },
+            "nested": { "inner": "deep" }
+          }
+        }
+      }
+    }
+  ]
+}

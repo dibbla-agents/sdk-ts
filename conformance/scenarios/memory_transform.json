@@ -1,0 +1,245 @@
+{
+  "name": "memory_transform",
+  "description": "A memory transform receives the stored turns, the current message, the token budget and the engine-asserted thread meta (DIB-445), and returns turns that round-trip the v2 ChatBlob shape unchanged (DIB-154), plus extra outputs (DIB-449).",
+  "steps": [
+    {
+      "accept": {}
+    },
+    {
+      "include": "handshake"
+    },
+    {
+      "send": {
+        "event": "capability_provider_request",
+        "correlation_id": "c-mem",
+        "payload": {
+          "json": {
+            "capability": "memory",
+            "provider": "marker",
+            "turns": [
+              {
+                "id": "t1",
+                "role": "user",
+                "date": "2026-09-20T10:00:00Z",
+                "run_id": "run-0",
+                "parts": [
+                  {
+                    "type": "text",
+                    "text": {
+                      "text": "hello"
+                    }
+                  },
+                  {
+                    "type": "attachment",
+                    "attachment": {
+                      "file_hash": "fh1",
+                      "name": "a.pdf",
+                      "content_type": "application/pdf",
+                      "size_bytes": 1024
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "t2",
+                "role": "assistant",
+                "date": "2026-09-20T10:00:05.5Z",
+                "correlation_id": "c0",
+                "provider_response_id": "resp_1",
+                "parts": [
+                  {
+                    "type": "reasoning",
+                    "reasoning": {
+                      "provider": "anthropic",
+                      "opaque_payload": {
+                        "signature": "sig",
+                        "n": 1
+                      },
+                      "summary": "thinking"
+                    }
+                  },
+                  {
+                    "type": "tool_call",
+                    "tool_call": {
+                      "tool_name": "search",
+                      "args": {
+                        "q": "x",
+                        "n": 2
+                      },
+                      "result": [
+                        1,
+                        "two",
+                        {
+                          "three": 3
+                        }
+                      ],
+                      "duration_ms": 12,
+                      "provider_tool_id": "toolu_1"
+                    }
+                  },
+                  {
+                    "type": "tool_call",
+                    "tool_call": {
+                      "tool_name": "broken",
+                      "error": "timeout"
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "text": {
+                      "text": "done"
+                    }
+                  }
+                ]
+              }
+            ],
+            "current_message": "what now?",
+            "token_budget": 60000,
+            "thread_meta": {
+              "thread_id": "th-1",
+              "turn_count": 2,
+              "org_id": "org-9",
+              "user_id": "u-3",
+              "run_id": "r-1",
+              "workflow_id": "w-1",
+              "node_id": "n-1",
+              "model": "m-x"
+            },
+            "extra_inputs": {
+              "note": "remember"
+            }
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "event": "capability_provider_response",
+        "correlation_id": "c-mem",
+        "payload": {
+          "json": {
+            "turns": [
+              {
+                "id": "marker",
+                "role": "assistant",
+                "date": "2026-01-01T00:00:00Z",
+                "parts": [
+                  {
+                    "type": "text",
+                    "text": {
+                      "text": "[marker msg=what now? org=org-9 user=u-3 budget=60000 turns=2]"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "t2",
+                "role": "assistant",
+                "date": "2026-09-20T10:00:05.5Z",
+                "correlation_id": "c0",
+                "provider_response_id": "resp_1",
+                "parts": [
+                  {
+                    "type": "reasoning",
+                    "reasoning": {
+                      "provider": "anthropic",
+                      "opaque_payload": {
+                        "signature": "sig",
+                        "n": 1
+                      },
+                      "summary": "thinking"
+                    }
+                  },
+                  {
+                    "type": "tool_call",
+                    "tool_call": {
+                      "tool_name": "search",
+                      "args": {
+                        "q": "x",
+                        "n": 2
+                      },
+                      "result": [
+                        1,
+                        "two",
+                        {
+                          "three": 3
+                        }
+                      ],
+                      "duration_ms": 12,
+                      "provider_tool_id": "toolu_1"
+                    }
+                  },
+                  {
+                    "type": "tool_call",
+                    "tool_call": {
+                      "tool_name": "broken",
+                      "error": "timeout"
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "text": {
+                      "text": "done"
+                    }
+                  }
+                ]
+              }
+            ],
+            "extra_outputs": {
+              "note": "remember"
+            }
+          }
+        }
+      }
+    },
+    {
+      "comment": "An api-key run: user_id is null, there are no turns and no extra inputs."
+    },
+    {
+      "send": {
+        "event": "capability_provider_request",
+        "correlation_id": "c-mem-anon",
+        "payload": {
+          "json": {
+            "capability": "memory",
+            "provider": "marker",
+            "turns": [],
+            "current_message": "hi",
+            "token_budget": 100,
+            "thread_meta": {
+              "thread_id": "th-2",
+              "turn_count": 0,
+              "org_id": "org-9",
+              "user_id": null
+            }
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "event": "capability_provider_response",
+        "correlation_id": "c-mem-anon",
+        "payload": {
+          "json": {
+            "turns": [
+              {
+                "id": "marker",
+                "role": "assistant",
+                "date": "2026-01-01T00:00:00Z",
+                "parts": [
+                  {
+                    "type": "text",
+                    "text": {
+                      "text": "[marker msg=hi org=org-9 user=none budget=100 turns=0]"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

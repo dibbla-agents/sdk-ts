@@ -1,0 +1,241 @@
+{
+  "name": "caller_identity",
+  "description": "The verified caller comes from the platform-asserted meta keys, never from the payload. An org without an asserted identity is no caller.",
+  "steps": [
+    {
+      "accept": {}
+    },
+    {
+      "include": "handshake"
+    },
+    {
+      "comment": "A signed-in user invoking directly."
+    },
+    {
+      "send": {
+        "event": "function_request",
+        "function": "whoami",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-1",
+        "run": "run-1",
+        "correlation_id": "c-user",
+        "meta": {
+          "asserted_identity": "user-authenticated",
+          "asserted_user_id": "user-42",
+          "asserted_user_email": "ada@example.com",
+          "asserted_user_name": "Ada Lovelace",
+          "asserted_org_id": "org-1",
+          "asserted_org_role": "owner"
+        },
+        "payload": {
+          "json": {
+            "query": "q"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "event": "function_response",
+        "function": "whoami",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-1",
+        "run": "run-1",
+        "correlation_id": "c-user",
+        "payload": {
+          "json": {
+            "present": true,
+            "is_user": true,
+            "identity": "user-authenticated",
+            "user_id": "user-42",
+            "email": "ada@example.com",
+            "name": "Ada Lovelace",
+            "org_id": "org-1",
+            "org_role": "owner"
+          }
+        }
+      }
+    },
+    {
+      "comment": "A workflow run: no identity asserted."
+    },
+    {
+      "send": {
+        "event": "function_request",
+        "function": "whoami",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-1",
+        "run": "run-1",
+        "correlation_id": "c-anon",
+        "payload": {
+          "json": {
+            "query": "q"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "event": "function_response",
+        "function": "whoami",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-1",
+        "run": "run-1",
+        "correlation_id": "c-anon",
+        "payload": {
+          "json": {
+            "present": false,
+            "is_user": false,
+            "identity": "",
+            "user_id": "",
+            "email": "",
+            "name": "",
+            "org_id": "",
+            "org_role": ""
+          }
+        }
+      }
+    },
+    {
+      "comment": "Identity-shaped inputs must not become the caller."
+    },
+    {
+      "send": {
+        "event": "function_request",
+        "function": "whoami",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-1",
+        "run": "run-1",
+        "correlation_id": "c-spoof",
+        "payload": {
+          "json": {
+            "query": "q",
+            "asserted_identity": "user-authenticated",
+            "asserted_user_id": "admin",
+            "asserted_user_email": "admin@example.com"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "event": "function_response",
+        "function": "whoami",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-1",
+        "run": "run-1",
+        "correlation_id": "c-spoof",
+        "payload": {
+          "json": {
+            "present": false,
+            "is_user": false,
+            "identity": "",
+            "user_id": "",
+            "email": "",
+            "name": "",
+            "org_id": "",
+            "org_role": ""
+          }
+        }
+      }
+    },
+    {
+      "comment": "An org without an identity mode is no caller at all, so even the org is not reported."
+    },
+    {
+      "send": {
+        "event": "function_request",
+        "function": "whoami",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-1",
+        "run": "run-1",
+        "correlation_id": "c-org-only",
+        "meta": {
+          "asserted_org_id": "org-1",
+          "asserted_org_role": 42
+        },
+        "payload": {
+          "json": {
+            "query": "q"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "event": "function_response",
+        "function": "whoami",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-1",
+        "run": "run-1",
+        "correlation_id": "c-org-only",
+        "payload": {
+          "json": {
+            "present": false,
+            "is_user": false,
+            "identity": "",
+            "user_id": "",
+            "email": "",
+            "name": "",
+            "org_id": "",
+            "org_role": ""
+          }
+        }
+      }
+    },
+    {
+      "comment": "An identity mode other than a user is a caller, but not a user."
+    },
+    {
+      "send": {
+        "event": "function_request",
+        "function": "whoami",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-1",
+        "run": "run-1",
+        "correlation_id": "c-future",
+        "meta": {
+          "asserted_identity": "some-future-mode",
+          "asserted_user_id": "user-42"
+        },
+        "payload": {
+          "json": {
+            "query": "q"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "event": "function_response",
+        "function": "whoami",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-1",
+        "run": "run-1",
+        "correlation_id": "c-future",
+        "payload": {
+          "json": {
+            "present": true,
+            "is_user": false,
+            "identity": "some-future-mode",
+            "user_id": "user-42",
+            "email": "",
+            "name": "",
+            "org_id": "",
+            "org_role": ""
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,139 @@
+{
+  "name": "job_failures",
+  "description": "A failing job, an unknown job and undecodable job arguments all end in job_failed with the error in meta.",
+  "steps": [
+    {
+      "accept": {}
+    },
+    {
+      "include": "handshake"
+    },
+    {
+      "send": {
+        "event": "job_trigger",
+        "run": "run-fail",
+        "meta": {
+          "job_id": "count_job",
+          "job_name": "Count Job"
+        },
+        "payload": {
+          "json": {
+            "limit": 1,
+            "fail": true
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "server": "${worker}",
+        "event": "job_started",
+        "run": "run-fail",
+        "correlation_id": "run-fail",
+        "meta": {
+          "timestamp": "$nonempty",
+          "job_id": "count_job",
+          "job_name": "Count Job",
+          "status": "in_progress"
+        }
+      }
+    },
+    {
+      "expect": {
+        "server": "${worker}",
+        "event": "log_message",
+        "run": "run-fail",
+        "correlation_id": "run-fail",
+        "meta": {
+          "timestamp": "$nonempty",
+          "job_id": "count_job",
+          "job_name": "Count Job",
+          "log_level": "info"
+        },
+        "text": "starting"
+      }
+    },
+    {
+      "expect": {
+        "server": "${worker}",
+        "event": "log_message",
+        "run": "run-fail",
+        "correlation_id": "run-fail",
+        "meta": {
+          "timestamp": "$nonempty",
+          "job_id": "count_job",
+          "job_name": "Count Job",
+          "log_level": "error"
+        },
+        "text": "failing"
+      }
+    },
+    {
+      "expect": {
+        "server": "${worker}",
+        "event": "job_failed",
+        "run": "run-fail",
+        "correlation_id": "run-fail",
+        "meta": {
+          "timestamp": "$nonempty",
+          "job_id": "count_job",
+          "job_name": "Count Job",
+          "status": "failed",
+          "error": "count failed"
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "job_trigger",
+        "run": "run-unknown",
+        "meta": {
+          "job_id": "nope"
+        }
+      }
+    },
+    {
+      "expect": {
+        "server": "${worker}",
+        "event": "job_failed",
+        "run": "run-unknown",
+        "correlation_id": "run-unknown",
+        "meta": {
+          "timestamp": "$nonempty",
+          "job_id": "nope",
+          "job_name": "",
+          "status": "failed",
+          "error": "job not found: nope"
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "job_trigger",
+        "run": "run-garbage",
+        "meta": {
+          "job_id": "count_job",
+          "job_name": "Count Job"
+        },
+        "payload": {
+          "text": "{bad"
+        }
+      }
+    },
+    {
+      "expect": {
+        "server": "${worker}",
+        "event": "job_failed",
+        "run": "run-garbage",
+        "correlation_id": "run-garbage",
+        "meta": {
+          "timestamp": "$nonempty",
+          "job_id": "count_job",
+          "job_name": "Count Job",
+          "status": "failed",
+          "error": "$nonempty"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "name": "cache",
+  "description": "A function with a cache TTL asks the platform cache first. On a miss it runs, stores the output with the TTL in seconds, then answers; on a hit it answers with the cached bytes without running. The key is murmur3-64 over payload bytes, name and version, in decimal.",
+  "steps": [
+    { "accept": {} },
+    { "include": "handshake" },
+    { "comment": "Miss." },
+    {
+      "send": {
+        "event": "function_request", "function": "cached_upper", "version": "1.0.0",
+        "node": "node-1", "workflow": "wf-1", "run": "run-1", "correlation_id": "c-miss",
+        "payload": { "text": "{\"text\":\"hello\"}" }
+      }
+    },
+    {
+      "expect": {
+        "event": "cache_get_request", "text": "Cache get request", "correlation_id": "$capture:get1",
+        "meta": { "Key": "676529269163292368", "calling_server": "${worker}" }
+      }
+    },
+    { "send": { "event": "cache_get_response", "correlation_id": "${get1}" } },
+    {
+      "expect": {
+        "event": "cache_set", "text": "Cache set", "correlation_id": "$nonempty",
+        "meta": { "Key": "676529269163292368", "TTL": 60, "calling_server": "${worker}" },
+        "payload": { "json": { "text": "HELLO" } }
+      }
+    },
+    {
+      "expect": {
+        "event": "function_response", "function": "cached_upper", "version": "1.0.0",
+        "node": "node-1", "workflow": "wf-1", "run": "run-1", "correlation_id": "c-miss",
+        "payload": { "json": { "text": "HELLO" } }
+      }
+    },
+    { "comment": "Hit: the cached bytes are the answer, even when they differ from what the handler would produce." },
+    {
+      "send": {
+        "event": "function_request", "function": "cached_upper", "version": "1.0.0",
+        "node": "node-2", "workflow": "wf-1", "run": "run-2", "correlation_id": "c-hit",
+        "payload": { "text": "{\"text\":\"hello\"}" }
+      }
+    },
+    {
+      "expect": {
+        "event": "cache_get_request", "text": "Cache get request", "correlation_id": "$capture:get2",
+        "meta": { "Key": "676529269163292368", "calling_server": "${worker}" }
+      }
+    },
+    { "send": { "event": "cache_get_response", "correlation_id": "${get2}", "payload": { "json": { "text": "FROM-CACHE" } } } },
+    {
+      "expect": {
+        "event": "function_response", "function": "cached_upper", "version": "1.0.0",
+        "node": "node-2", "workflow": "wf-1", "run": "run-2", "correlation_id": "c-hit",
+        "payload": { "json": { "text": "FROM-CACHE" } }
+      }
+    },
+    { "expect_none": { "for_ms": 500 } }
+  ]
+}

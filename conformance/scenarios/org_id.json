@@ -1,0 +1,9 @@
+{
+  "name": "org_id",
+  "description": "SERVER_ORG_ID pins registration to an organization via x-org-id metadata, alongside the credential.",
+  "worker": { "env": { "SERVER_ORG_ID": "org-conformance" } },
+  "steps": [
+    { "accept": { "metadata": { "authorization": "Bearer ${token}", "x-org-id": "org-conformance" } } },
+    { "include": "handshake" }
+  ]
+}

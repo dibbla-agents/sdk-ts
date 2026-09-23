@@ -1,0 +1,77 @@
+[
+  { "comment": "Opening message on every new stream." },
+  {
+    "expect": {
+      "server": "${worker}",
+      "event": "client_registration",
+      "text": "Client registration"
+    }
+  },
+  { "comment": "Server registration: functions then providers, correlated 'startup'." },
+  {
+    "expect": {
+      "server": "${worker}",
+      "event": "response_list_functions",
+      "text": "List of functions",
+      "correlation_id": "startup",
+      "payload": { "json": { "$fragment": "functions" } }
+    }
+  },
+  {
+    "expect": {
+      "server": "${worker}",
+      "event": "response_list_capability_providers",
+      "text": "List of capability providers",
+      "correlation_id": "startup",
+      "payload": { "json": { "$fragment": "providers" } }
+    }
+  },
+  { "comment": "Startup broadcast: the same lists with the 'startup' pseudo-invocation fields." },
+  {
+    "expect": {
+      "function": "startup",
+      "node": "startup",
+      "workflow": "startup",
+      "version": "1.0",
+      "run": "startup",
+      "server": "${worker}",
+      "event": "response_list_functions",
+      "text": "List of functions",
+      "correlation_id": "startup",
+      "payload": { "json": { "$fragment": "functions" } }
+    }
+  },
+  {
+    "expect": {
+      "function": "startup",
+      "node": "startup",
+      "workflow": "startup",
+      "version": "1.0",
+      "run": "startup",
+      "server": "${worker}",
+      "event": "response_list_capability_providers",
+      "text": "List of capability providers",
+      "correlation_id": "startup",
+      "payload": { "json": { "$fragment": "providers" } }
+    }
+  },
+  { "comment": "Jobs are announced last, in meta. A parameter without a default sends null." },
+  {
+    "expect": {
+      "server": "${worker}",
+      "event": "job_registration",
+      "meta": {
+        "host_id": "${worker}",
+        "jobs": {
+          "count_job": {
+            "name": "Count Job",
+            "parameters": {
+              "limit": { "type": "int", "required": true, "default": null },
+              "label": { "type": "string", "required": false, "default": "items" }
+            }
+          }
+        }
+      }
+    }
+  }
+]

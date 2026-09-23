@@ -1,0 +1,17 @@
+{
+  "name": "auth_rejected_rotated_identity",
+  "description": "After an Unauthenticated rejection, if the identity token file now holds a different token the worker retries on the normal cadence with it instead of holding (DIB-202).",
+  "worker": {
+    "unset": ["SERVER_API_TOKEN"],
+    "env": { "DIBBLA_IDENTITY_TOKEN_FILE": "${tmp}/identity-token" },
+    "files": { "identity-token": "stale-token" }
+  },
+  "steps": [
+    { "accept": { "metadata": { "authorization": "Bearer stale-token" } } },
+    { "include": "handshake" },
+    { "write_file": { "name": "identity-token", "content": "fresh-token" } },
+    { "end_stream": { "code": "UNAUTHENTICATED", "details": "Invalid or expired API token" } },
+    { "accept": { "metadata": { "authorization": "Bearer fresh-token" } }, "timeout_ms": 15000 },
+    { "include": "handshake" }
+  ]
+}
