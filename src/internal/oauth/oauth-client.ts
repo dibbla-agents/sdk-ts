@@ -1,5 +1,5 @@
 import { EventMessage, Events } from '../../types/events';
-import { CorrelationRouter } from '../correlation/router';
+import { CorrelationRouter, RequestOptions } from '../correlation/router';
 import { uid } from '../utils/uid';
 import { WorkflowCommunicator } from '../cache/cache-client';
 
@@ -35,7 +35,7 @@ export interface OAuthProviderStatus {
 }
 
 /**
- * OAuth error from the server.
+ * An oauth_error from the server, e.g. the user has not connected the provider.
  */
 export class OAuthError extends Error {
   code: string;
@@ -48,225 +48,101 @@ export class OAuthError extends Error {
 }
 
 /**
- * GrpcOAuthClient provides OAuth token operations over the workflow gRPC stream.
+ * OAuth access tokens for the user behind a run, over the workflow stream.
+ * The server resolves the organization and user from the run id.
  */
 export class GrpcOAuthClient {
-  private communicator: WorkflowCommunicator;
-  private router: CorrelationRouter;
-  private defaultTimeoutMs: number;
-  private serverName: string;
+  private readonly router = new CorrelationRouter();
 
   constructor(
-    communicator: WorkflowCommunicator,
-    serverName: string,
-    defaultTimeoutMs: number = 30000
-  ) {
-    this.communicator = communicator;
-    this.serverName = serverName;
-    this.defaultTimeoutMs = defaultTimeoutMs;
-    this.router = new CorrelationRouter();
+    private readonly communicator: WorkflowCommunicator,
+    private readonly serverName: string,
+    private readonly defaultTimeoutMs: number = 30_000,
+  ) {}
+
+  private async request(event: string, text: string, runId: string, body: Record<string, string>, awaiting: string, options: RequestOptions): Promise<EventMessage> {
+    const message: EventMessage = {
+      function: '',
+      node: '',
+      workflow: '',
+      version: '',
+      server: '',
+      event,
+      text,
+      run: runId,
+      meta: null,
+      payload: Buffer.from(JSON.stringify(body)),
+      correlationId: uid(),
+    };
+    return this.router.request(message.correlationId, () => this.communicator.sendEvent(message), awaiting, {
+      timeoutMs: options.timeoutMs ?? this.defaultTimeoutMs,
+      signal: options.signal,
+    });
   }
 
   /**
-   * Request an OAuth access token for the specified provider.
-   * Uses the run_id to resolve organization context automatically.
+   * An access token for the provider, refreshed by the platform if needed.
+   * Throws OAuthError when the server refuses (e.g. not connected).
    */
-  async getAccessToken(
-    provider: OAuthProvider,
-    runId: string,
-    timeoutMs?: number
-  ): Promise<OAuthTokenResponse> {
-    if (!this.communicator.isConnected()) {
-      throw new Error('oauth: no communicator connected');
-    }
+  async getAccessToken(provider: OAuthProvider, runId: string, options: RequestOptions = {}): Promise<OAuthTokenResponse> {
+    const response = await this.request(Events.OAuthTokenRequest, 'OAuth token request', runId, { provider, run_id: runId }, 'oauth_token_response', options);
+    const data = this.parse(response) as Record<string, unknown>;
+    return {
+      accessToken: data.access_token as string,
+      tokenType: data.token_type as string,
+      expiresAt: data.expires_at as number,
+      provider: data.provider as string,
+    };
+  }
 
-    const correlationId = uid();
-    const { promise, cancel } = this.router.registerWithChannel(correlationId);
-
-    const timeout = timeoutMs ?? this.defaultTimeoutMs;
-    const timeoutHandle = setTimeout(() => {
-      cancel();
-    }, timeout);
-
-    try {
-      const payload = Buffer.from(
-        JSON.stringify({
-          provider,
-          run_id: runId,
-        })
-      );
-
-      const event: EventMessage = {
-        function: '',
-        node: '',
-        workflow: '',
-        version: '',
-        server: '',
-        event: Events.OAuthTokenRequest,
-        text: 'OAuth token request',
-        run: runId,
-        meta: null,
-        payload,
-        correlationId,
+  /** The providers the run's user has connected, by provider name. */
+  async getConnectedProviders(runId: string, options: RequestOptions = {}): Promise<Record<string, OAuthProviderStatus>> {
+    const response = await this.request(Events.OAuthStatusRequest, 'OAuth status request', runId, { run_id: runId }, 'oauth_status_response', options);
+    const data = this.parse(response) as Record<string, Record<string, unknown> | null>;
+    const result: Record<string, OAuthProviderStatus> = {};
+    for (const [name, status] of Object.entries(data ?? {})) {
+      result[name] = {
+        connected: Boolean(status?.connected),
+        email: (status?.email as string) ?? '',
+        lastUsed: (status?.last_used as number | null) ?? null,
+        scopes: (status?.scopes as string) ?? '',
       };
-
-      await this.communicator.sendEvent(event);
-
-      const response = await promise;
-      clearTimeout(timeoutHandle);
-
-      return this.parseTokenResponse(response);
-    } catch (err) {
-      clearTimeout(timeoutHandle);
-      throw err;
     }
+    return result;
   }
 
-  /**
-   * Check which OAuth providers are connected for the current run.
-   */
-  async getConnectedProviders(
-    runId: string,
-    timeoutMs?: number
-  ): Promise<Record<string, OAuthProviderStatus>> {
-    if (!this.communicator.isConnected()) {
-      throw new Error('oauth: no communicator connected');
-    }
-
-    const correlationId = uid();
-    const { promise, cancel } = this.router.registerWithChannel(correlationId);
-
-    const timeout = timeoutMs ?? this.defaultTimeoutMs;
-    const timeoutHandle = setTimeout(() => {
-      cancel();
-    }, timeout);
-
-    try {
-      const payload = Buffer.from(
-        JSON.stringify({
-          run_id: runId,
-        })
-      );
-
-      const event: EventMessage = {
-        function: '',
-        node: '',
-        workflow: '',
-        version: '',
-        server: '',
-        event: Events.OAuthStatusRequest,
-        text: 'OAuth status request',
-        run: runId,
-        meta: null,
-        payload,
-        correlationId,
-      };
-
-      await this.communicator.sendEvent(event);
-
-      const response = await promise;
-      clearTimeout(timeoutHandle);
-
-      return this.parseStatusResponse(response);
-    } catch (err) {
-      clearTimeout(timeoutHandle);
-      throw err;
-    }
+  /** Whether the run's user has connected the provider. Errors propagate. */
+  async isProviderConnected(provider: OAuthProvider, runId: string, options?: RequestOptions): Promise<boolean> {
+    return provider in (await this.getConnectedProviders(runId, options));
   }
 
-  /**
-   * Check if a specific provider is connected.
-   */
-  async isProviderConnected(provider: OAuthProvider, runId: string): Promise<boolean> {
-    try {
-      const providers = await this.getConnectedProviders(runId);
-      return provider in providers;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Handle a response from the server for OAuth operations.
-   */
+  /** Routes oauth_token_response / oauth_status_response / oauth_error to the waiting request. */
   handleResponse(response: EventMessage): void {
-    if (
-      response.event !== Events.OAuthTokenResponse &&
-      response.event !== Events.OAuthStatusResponse &&
-      response.event !== Events.OAuthError
-    ) {
-      return;
-    }
-    this.router.deliver(response.correlationId, response);
-  }
-
-  private parseTokenResponse(response: EventMessage): OAuthTokenResponse {
-    if (response.event === Events.OAuthError) {
-      throw this.parseError(response);
-    }
-
-    if (!response.payload) {
-      throw new Error('oauth: empty response payload');
-    }
-
-    try {
-      const data = JSON.parse(response.payload.toString());
-      return {
-        accessToken: data.access_token,
-        tokenType: data.token_type,
-        expiresAt: data.expires_at,
-        provider: data.provider,
-      };
-    } catch {
-      throw new Error('oauth: failed to parse token response');
+    switch (response.event) {
+      case Events.OAuthTokenResponse:
+      case Events.OAuthStatusResponse:
+      case Events.OAuthError:
+        this.router.deliver(response.correlationId, response);
     }
   }
 
-  private parseStatusResponse(response: EventMessage): Record<string, OAuthProviderStatus> {
+  private parse(response: EventMessage): unknown {
     if (response.event === Events.OAuthError) {
-      throw this.parseError(response);
-    }
-
-    if (!response.payload) {
-      throw new Error('oauth: empty response payload');
-    }
-
-    try {
-      const data = JSON.parse(response.payload.toString());
-      const result: Record<string, OAuthProviderStatus> = {};
-
-      for (const [provider, status] of Object.entries(data)) {
-        const s = status as {
-          connected: boolean;
-          email: string;
-          last_used: number | null;
-          scopes: string;
-        };
-        result[provider] = {
-          connected: s.connected,
-          email: s.email,
-          lastUsed: s.last_used,
-          scopes: s.scopes,
-        };
+      if (!response.payload) throw new OAuthError('unknown', 'unknown error');
+      const text = response.payload.toString('utf8');
+      let data: { error?: string; error_message?: string };
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(`oauth: error: ${text}`);
       }
-
-      return result;
-    } catch {
-      throw new Error('oauth: failed to parse status response');
+      throw new OAuthError(data.error ?? '', data.error_message ?? '');
     }
-  }
-
-  private parseError(response: EventMessage): OAuthError {
-    if (!response.payload) {
-      return new OAuthError('unknown', 'Unknown OAuth error');
-    }
-
+    if (!response.payload || response.payload.length === 0) throw new Error('oauth: empty response payload');
     try {
-      const data = JSON.parse(response.payload.toString());
-      return new OAuthError(data.error || 'unknown', data.error_message || 'Unknown error');
-    } catch {
-      return new OAuthError('unknown', response.payload.toString());
+      return JSON.parse(response.payload.toString('utf8'));
+    } catch (err) {
+      throw new Error(`oauth: failed to parse response: ${(err as Error).message}`);
     }
   }
 }
-

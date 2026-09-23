@@ -1,0 +1,81 @@
+{
+  "name": "oauth_status",
+  "description": "An OAuth status request names the run; the response maps provider names to their connection status.",
+  "steps": [
+    {
+      "accept": {}
+    },
+    {
+      "include": "handshake"
+    },
+    {
+      "send": {
+        "event": "function_request",
+        "function": "oauth_status",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-1",
+        "run": "run-3",
+        "correlation_id": "c-status",
+        "payload": {
+          "json": {
+            "text": "x"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "event": "oauth_status_request",
+        "text": "OAuth status request",
+        "run": "run-3",
+        "correlation_id": "$capture:req",
+        "payload": {
+          "json": {
+            "run_id": "run-3"
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "event": "oauth_status_response",
+        "correlation_id": "${req}",
+        "payload": {
+          "json": {
+            "google": {
+              "connected": true,
+              "email": "ada@example.com",
+              "last_used": null,
+              "scopes": "drive"
+            },
+            "github": {
+              "connected": false,
+              "email": "",
+              "last_used": 1790000000,
+              "scopes": ""
+            }
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "event": "function_response",
+        "function": "oauth_status",
+        "version": "1.0.0",
+        "node": "node-1",
+        "workflow": "wf-1",
+        "run": "run-3",
+        "correlation_id": "c-status",
+        "payload": {
+          "json": {
+            "providers": [
+              "google"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

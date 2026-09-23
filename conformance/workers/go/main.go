@@ -15,11 +15,14 @@ import (
 	"errors"
 	"log"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	sdk "github.com/dibbla-agents/sdk-go"
+	"github.com/dibbla-agents/sdk-go/internal/basefunction"
+	"github.com/dibbla-agents/sdk-go/internal/models"
 	"github.com/dibbla-agents/sdk-go/internal/oauth"
 	"github.com/dibbla-agents/sdk-go/internal/state"
 	"github.com/dibbla-agents/sdk-go/internal/types"
@@ -51,6 +54,8 @@ func main() {
 	server.RegisterFunction(cachedUpperFunction())
 	server.RegisterFunction(storeAppendFunction())
 	server.RegisterFunction(oauthTokenFunction())
+	server.RegisterFunction(oauthStatusFunction())
+	server.RegisterFunction(rpcEchoFunction())
 	server.RegisterFunction(statusPingFunction())
 
 	for _, p := range providers() {
@@ -193,6 +198,51 @@ func oauthTokenFunction() sdk.FunctionBuilder {
 				return TokenOut{}, err
 			}
 			return TokenOut{AccessToken: tok.AccessToken, TokenType: tok.TokenType, Provider: tok.Provider}, nil
+		})
+}
+
+type ProvidersOut struct {
+	Providers []string `json:"providers"`
+}
+
+func oauthStatusFunction() sdk.FunctionBuilder {
+	return sdk.NewFunction[TextIn, ProvidersOut]("oauth_status", "1.0.0", "List connected OAuth providers").
+		WithHandler(func(_ TextIn, ev *types.EventMessage, gs *state.GlobalState) (ProvidersOut, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			status, err := gs.OAuth.GetConnectedProviders(ctx, ev.Run)
+			if err != nil {
+				return ProvidersOut{}, err
+			}
+			providers := []string{}
+			for name, s := range status {
+				if s != nil && s.Connected {
+					providers = append(providers, name)
+				}
+			}
+			sort.Strings(providers)
+			return ProvidersOut{Providers: providers}, nil
+		})
+}
+
+type ReplyOut struct {
+	Reply string `json:"reply"`
+}
+
+func rpcEchoFunction() sdk.FunctionBuilder {
+	return sdk.NewFunction[TextIn, ReplyOut]("rpc_echo", "1.0.0", "Call echo on another worker").
+		WithHandler(func(in TextIn, ev *types.EventMessage, gs *state.GlobalState) (ReplyOut, error) {
+			node := &models.Node{
+				ID:   "rpc-node",
+				Type: "function",
+				Data: models.NodeData{Function: basefunction.FunctionDefinition{Name: "echo", Version: "1.0.0", Server: "other-worker"}},
+			}
+			out, err := gs.RpcClient.Call(1, node, ev, map[string]string{"text": in.Text})
+			if err != nil {
+				return ReplyOut{}, err
+			}
+			return ReplyOut{Reply: string(out)}, nil
 		})
 }
 

@@ -83,6 +83,19 @@ for provider `google` using the invocation's run id. Output
 `{ access_token, token_type, provider }` from the token response. An OAuth
 error fails the function with the SDK's OAuth error as the message.
 
+### `oauth_status` — "List connected OAuth providers"
+
+Function. Input `{ text: string }` (ignored). Requests the OAuth status for
+the invocation's run. Output `{ providers: string[] }`: the names of the
+providers whose status says `connected`, sorted.
+
+### `rpc_echo` — "Call echo on another worker"
+
+Function. Input `{ text: string }`. Calls function `echo` version `1.0.0` on
+server `other-worker` through the SDK's RPC client, as execution node
+`rpc-node` of type `function`, with payload `{ "text": <text> }` and a one
+minute timeout. Output `{ reply: string }`: the raw response payload as text.
+
 ### `status_ping` — "Send a status message"
 
 Function. Input `{ text: string }`. Sends a status message with text `working`

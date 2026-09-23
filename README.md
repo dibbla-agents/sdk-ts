@@ -253,12 +253,9 @@ const fn = sdk.newFunction({
   input: MyInputSchema,
   output: MyOutputSchema,
   handler: async (input, event, globalState) => {
-    // Get an access token for Google
-    const token = await globalState.oauth?.getAccessToken('google', event.run);
-    
-    if (!token) {
-      throw new Error('Please connect your Google account first');
-    }
+    // Get an access token for Google. Throws sdk.OAuthError when the user
+    // has not connected the provider, sdk.TimeoutError if no answer comes.
+    const token = await globalState.oauth!.getAccessToken('google', event.run);
 
     // Use the token to call Google APIs
     // token.accessToken - the bearer token
@@ -718,12 +715,17 @@ await globalState.rpc?.sendStatusEvent(event, text, payload?);
 Store and retrieve data associated with workflows:
 
 ```typescript
-// Get a value
+// Get a value: null when there is none
 const value = await globalState.store?.getString(event.workflow, 'my-key');
 
 // Set a value
 await globalState.store?.setString(event.workflow, 'my-key', 'my-value');
 ```
+
+A read that gets no answer in time throws `sdk.TimeoutError` instead of
+returning `null`, so a read-modify-write never overwrites data it didn't see.
+Requests that wait for an answer (store and cache reads, OAuth, RPC) accept
+`{ timeoutMs, signal }`; the default timeout is 30 seconds.
 
 ### Robust Connection Management
 

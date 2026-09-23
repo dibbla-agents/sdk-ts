@@ -89,7 +89,7 @@ server.registerFunctions([
     handler: async (input, event, state) => {
       let history: string[] = [];
       try {
-        const data = await state.store!.get(event.workflow, 'history');
+        const data = await state.store!.get(event.workflow, 'history', { timeoutMs: 10_000 });
         if (data && data.length > 0) {
           const parsed = JSON.parse(data.toString());
           if (Array.isArray(parsed)) history = parsed;
@@ -109,8 +109,35 @@ server.registerFunctions([
     input: TextIn,
     output: z.object({ access_token: z.string(), token_type: z.string(), provider: z.string() }),
     handler: async (_input, event, state) => {
-      const token = await state.oauth!.getAccessToken('google', event.run);
+      const token = await state.oauth!.getAccessToken('google', event.run, { timeoutMs: 10_000 });
       return { access_token: token.accessToken, token_type: token.tokenType, provider: token.provider };
+    },
+  }),
+  sdk.newFunction({
+    name: 'oauth_status',
+    version: '1.0.0',
+    description: 'List connected OAuth providers',
+    input: TextIn,
+    output: z.object({ providers: z.array(z.string()) }),
+    handler: async (_input, event, state) => {
+      const status = await state.oauth!.getConnectedProviders(event.run, { timeoutMs: 10_000 });
+      const providers = Object.entries(status)
+        .filter(([, s]) => s.connected)
+        .map(([name]) => name)
+        .sort();
+      return { providers };
+    },
+  }),
+  sdk.newFunction({
+    name: 'rpc_echo',
+    version: '1.0.0',
+    description: 'Call echo on another worker',
+    input: TextIn,
+    output: z.object({ reply: z.string() }),
+    handler: async (input, event, state) => {
+      const node = { id: 'rpc-node', type: 'function', data: { function: { name: 'echo', version: '1.0.0', server: 'other-worker' } } };
+      const out = await state.rpc!.call(1, node, event, { text: input.text });
+      return { reply: out.toString('utf8') };
     },
   }),
   sdk.newFunction({

@@ -56,6 +56,7 @@ export {
   OAuthProviderStatus,
   ExecutionNode,
   InvocationContext,
+  RequestOptions,
   // Re-export Zod for convenience
   z,
 } from './function';
@@ -117,8 +118,9 @@ export {
 
 export { functionKey, FUNCTION_PREFIX } from './types/keys';
 
-// OAuth provider constants
-export { OAuthProviders } from './internal/oauth/oauth-client';
+// OAuth provider constants and errors
+export { OAuthProviders, OAuthError } from './internal/oauth/oauth-client';
+export { TimeoutError } from './internal/correlation/router';
 
 // Utility exports (for advanced use cases)
 export { shouldUseTLS, NotConnectedError } from './internal/grpc/communicator';

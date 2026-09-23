@@ -101,31 +101,39 @@ export interface GlobalState {
   rpc: RpcClient | null;
 }
 
+/** For requests that wait for a response: a timeout (default 30s) and/or a signal. */
+export interface RequestOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
 // Forward declarations for service clients
 export interface CacheClient {
-  get(key: bigint): Promise<Buffer | null>;
+  /** The cached value, or null on a miss (including a lookup that timed out). */
+  get(key: bigint, options?: RequestOptions): Promise<Buffer | null>;
   set(key: bigint, value: Buffer): Promise<void>;
   setWithTTL(key: bigint, value: Buffer, ttlMs: number): Promise<void>;
-  getByString(key: string): Promise<Buffer | null>;
+  getByString(key: string, options?: RequestOptions): Promise<Buffer | null>;
   setByString(key: string, value: Buffer, ttlSeconds?: number): Promise<void>;
 }
 
 export interface StoreClient {
-  get(workflowId: string, key: string): Promise<Buffer | null>;
+  /** The stored value, or null when there is none. Throws if no answer arrives in time. */
+  get(workflowId: string, key: string, options?: RequestOptions): Promise<Buffer | null>;
   set(workflowId: string, key: string, value: Buffer): Promise<void>;
-  getString(workflowId: string, key: string): Promise<string | null>;
+  getString(workflowId: string, key: string, options?: RequestOptions): Promise<string | null>;
   setString(workflowId: string, key: string, value: string): Promise<void>;
 }
 
 export interface OAuthClient {
-  getAccessToken(provider: OAuthProvider, runId: string): Promise<OAuthTokenResponse>;
-  getConnectedProviders(runId: string): Promise<Record<string, OAuthProviderStatus>>;
-  isProviderConnected(provider: OAuthProvider, runId: string): Promise<boolean>;
+  getAccessToken(provider: OAuthProvider, runId: string, options?: RequestOptions): Promise<OAuthTokenResponse>;
+  getConnectedProviders(runId: string, options?: RequestOptions): Promise<Record<string, OAuthProviderStatus>>;
+  isProviderConnected(provider: OAuthProvider, runId: string, options?: RequestOptions): Promise<boolean>;
 }
 
 export interface RpcClient {
   sendStatusEvent(eventState: EventMessage, text: string, payload?: unknown): Promise<void>;
-  call(timeoutMinutes: number, node: ExecutionNode, eventState: EventMessage, payload: unknown): Promise<Buffer>;
+  call(timeoutMinutes: number, node: ExecutionNode, eventState: EventMessage, payload: unknown, options?: { signal?: AbortSignal }): Promise<Buffer>;
 }
 
 export type OAuthProvider = 'google' | 'microsoft' | 'github';
