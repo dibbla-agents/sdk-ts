@@ -1,6 +1,8 @@
 import * as dotenv from 'dotenv';
 import { ServerConfig, ServerOptions, mergeConfig, resolveTLS } from './config';
 import { GrpcCommunicator } from './internal/grpc/communicator';
+import { detectFileTokenProvider, TokenProvider } from './internal/grpc/token-provider';
+import { log, errorMessage } from './internal/log';
 import { Dispatcher } from './internal/dispatcher/dispatcher';
 import { GrpcCacheClient } from './internal/cache/cache-client';
 import { GrpcStoreClient } from './internal/store/store-client';
@@ -32,6 +34,7 @@ export class Server {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private pendingFunctions: WorkerFunction<any, any>[] = [];
   private started = false;
+  private resolveStopped: (() => void) | null = null;
 
   constructor(options: ServerOptions = {}) {
     this.config = mergeConfig(options);
@@ -50,7 +53,7 @@ export class Server {
       const key = functionKey(this.config.serverName, fn.name, fn.version);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       this.functions.set(key, fn as any);
-      console.log(`Registered function: ${fn.name}:${fn.version}`);
+      log.info(`Registered function: ${fn.name}:${fn.version}`);
     } else {
       // Queue for registration on start
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -74,10 +77,24 @@ export class Server {
    * This method blocks until the server is shut down.
    */
   async start(): Promise<void> {
-    console.log(`Starting server with name: ${this.config.serverName}`);
+    log.info(`Starting server with name: ${this.config.serverName}`);
 
     // Initialize global state and services
-    await this.initializeGlobalState();
+    this.initializeGlobalState();
+
+    // Wait for the connection before sending any registrations
+    log.info('Waiting for gRPC connection...');
+    try {
+      await this.communicator!.waitForConnection(30_000);
+    } catch (err) {
+      await this.communicator!.close();
+      throw new Error(`failed to establish connection: ${errorMessage(err)}`);
+    }
+
+    // Everything registered below is registered again on every reconnect.
+    this.communicator!.setOnReconnect(() => {
+      this.onReconnect().catch((err) => log.error(`Re-registration failed: ${errorMessage(err)}`));
+    });
 
     // Register pending functions
     this.registerPendingFunctions();
@@ -91,11 +108,20 @@ export class Server {
     // Activate handlers
     this.activateHandlers();
 
-    console.log('Stream listeners activated, server running...');
+    log.info('Stream listeners activated, server running...');
     this.started = true;
 
-    // Block forever (until process is terminated)
-    await new Promise(() => {});
+    // Run until stop()
+    await new Promise<void>((resolve) => (this.resolveStopped = resolve));
+  }
+
+  /**
+   * Disconnects from the workflow server and makes start() return.
+   */
+  async stop(): Promise<void> {
+    await this.communicator?.close();
+    await this.dispatcher?.stop();
+    this.resolveStopped?.();
   }
 
   /**
@@ -122,26 +148,41 @@ export class Server {
 
   // Private methods
 
-  private async initializeGlobalState(): Promise<void> {
+  private initializeGlobalState(): void {
     const useTLS = resolveTLS(this.config);
+
+    // Workload identity (DIB-202): with no explicit API token, use the
+    // projected identity token when one is present. It is re-read at every
+    // (re)connect, so kubelet rotation needs no coordination. An explicit
+    // token always wins, so local development is unchanged.
+    let tokenProvider: TokenProvider | undefined;
+    if (!this.config.serverApiToken) {
+      const fileProvider = detectFileTokenProvider(this.config.identityTokenFile);
+      if (fileProvider) {
+        log.info(`🔐 Using workload identity credential (${fileProvider.source()})`);
+        tokenProvider = fileProvider;
+      }
+    }
 
     // Create gRPC communicator
     this.communicator = new GrpcCommunicator({
       serverAddress: this.config.grpcServerAddress,
       serverName: this.config.serverName,
       apiToken: this.config.serverApiToken,
+      tokenProvider,
+      orgId: this.config.orgId,
       useTLS,
+      insecureSkipVerify: this.config.tlsInsecureSkipVerify,
       incomingBuffer: this.config.incomingEventsBuffer,
       reconnectIntervalSec: this.config.grpcReconnectIntervalSec,
       healthcheckIntervalSec: this.config.grpcHealthcheckIntervalSec,
       pingIntervalSec: this.config.pingIntervalSec,
+      keepaliveTimeSec: this.config.grpcKeepaliveTimeSec,
+      keepaliveTimeoutSec: this.config.grpcKeepaliveTimeoutSec,
     });
 
-    // Connect to the server (non-blocking, retries in background)
-    await this.communicator.connect();
-
-    // Wait for initial connection
-    await this.waitForConnection();
+    // Connect in the background; start() waits for the first connection.
+    this.communicator.connect();
 
     // Initialize service clients
     this.cacheClient = new GrpcCacheClient(this.communicator, this.config.serverName);
@@ -153,23 +194,18 @@ export class Server {
     this.dispatcher = new Dispatcher(this.config.handlersConcurrency);
     this.dispatcher.start();
 
-    console.log('Initialized global state (gRPC mode)');
+    log.info('Initialized global state (gRPC mode)');
   }
 
-  private async waitForConnection(): Promise<void> {
-    // Wait up to 30 seconds for initial connection
-    const maxWaitMs = 30000;
-    const checkIntervalMs = 100;
-    let waited = 0;
-
-    while (!this.communicator?.isConnected() && waited < maxWaitMs) {
-      await new Promise(resolve => setTimeout(resolve, checkIntervalMs));
-      waited += checkIntervalMs;
-    }
-
-    if (!this.communicator?.isConnected()) {
-      console.warn('Initial connection not established within timeout, continuing anyway...');
-    }
+  /**
+   * Called when the connection is re-established after a disconnect: the
+   * server has forgotten this worker, so everything is registered again.
+   */
+  private async onReconnect(): Promise<void> {
+    log.info('Connection re-established, re-registering with workflow server...');
+    await this.registerServer();
+    await this.sendStartupBroadcast();
+    log.info('Re-registration complete');
   }
 
   private registerPendingFunctions(): void {
@@ -180,7 +216,7 @@ export class Server {
     }
 
     this.pendingFunctions = [];
-    console.log(`Registered ${this.functions.size} functions`);
+    log.info(`Registered ${this.functions.size} functions`);
   }
 
   private setupFunction(fn: WorkerFunction): void {
@@ -214,7 +250,7 @@ export class Server {
     };
 
     await this.handleListFunctions(eventState);
-    console.log(`Server '${this.config.serverName}' registered with workflow server`);
+    log.info(`Server '${this.config.serverName}' registered with workflow server`);
   }
 
   private async sendStartupBroadcast(): Promise<void> {
@@ -231,7 +267,7 @@ export class Server {
     };
 
     await this.handleListFunctions(eventState);
-    console.log('Startup function list broadcast sent');
+    log.info('Startup function list broadcast sent');
   }
 
   private async handleListFunctions(eventState: {
@@ -265,7 +301,7 @@ export class Server {
     try {
       await this.communicator.sendEvent(event);
     } catch (err) {
-      console.error(`Failed to send list functions: ${(err as Error).message}`);
+      log.error(`Failed to send list functions: ${errorMessage(err)}`);
     }
   }
 

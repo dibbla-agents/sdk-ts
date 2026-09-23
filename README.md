@@ -77,12 +77,29 @@ main().catch(console.error);
 
 ### Environment Variables
 
-| Variable              | Default               | Description                                    |
-| --------------------- | --------------------- | ---------------------------------------------- |
-| `SERVER_NAME`         | `codex-ts-worker`     | Unique identifier for this worker              |
-| `GRPC_SERVER_ADDRESS` | `grpc.dibbla.com:443` | Address of the workflow server                 |
-| `SERVER_API_TOKEN`    | _(empty)_             | Authentication token                           |
-| `GRPC_USE_TLS`        | _(auto-detect)_       | Enable/disable TLS (`true`, `false`, or empty) |
+| Variable                        | Default               | Description                                                                 |
+| ------------------------------- | --------------------- | --------------------------------------------------------------------------- |
+| `SERVER_NAME`                   | `codex-ts-worker`     | Unique identifier for this worker                                           |
+| `GRPC_SERVER_ADDRESS`           | `grpc.dibbla.com:443` | Address of the workflow server                                              |
+| `SERVER_API_TOKEN`              | _(empty)_             | API token. When set, it wins over a workload identity token                 |
+| `DIBBLA_IDENTITY_TOKEN_FILE`    | _(set by platform)_   | Workload identity token file; see [Authentication](#authentication)         |
+| `SERVER_ORG_ID`                 | _(empty)_             | Pin registration to one organization (sent as `x-org-id`)                   |
+| `GRPC_USE_TLS`                  | _(auto-detect)_       | Enable/disable TLS (`true`, `false`, or empty)                              |
+| `GRPC_TLS_INSECURE_SKIP_VERIFY` | `false`               | Skip server certificate verification (insecure; self-signed servers only)   |
+| `GRPC_KEEPALIVE_TIME_SEC`       | `300`                 | HTTP/2 keepalive ping interval; see [Connection](#robust-connection-management) |
+| `GRPC_KEEPALIVE_TIMEOUT_SEC`    | `20`                  | HTTP/2 keepalive ack timeout                                                |
+| `DIBBLA_LOG_LEVEL`              | `info`                | SDK log level: `debug`, `info`, `warn`, `error` or `silent`                 |
+
+### Authentication
+
+- **On the Dibbla platform, no configuration is needed.** The platform mounts a
+  workload identity token and sets `DIBBLA_IDENTITY_TOKEN_FILE`. The SDK
+  presents it and re-reads it at every (re)connect, so token rotation just
+  works. `/var/run/secrets/dibbla/identity/token` is also probed.
+- **Everywhere else**, set `SERVER_API_TOKEN`. An explicit token always wins
+  over an identity token.
+- If the token's owner belongs to several organizations, set `SERVER_ORG_ID`
+  to choose one. The platform verifies membership.
 
 ### TLS Configuration
 
@@ -571,10 +588,21 @@ await globalState.store?.setString(event.workflow, 'my-key', 'my-value');
 
 ### Robust Connection Management
 
-- Automatic reconnection on failure
-- Configurable health checks
-- Ping/pong keep-alive mechanism
-- Connection state monitoring
+- **Automatic reconnection.** Retries start at `grpcReconnectIntervalSec` (5s)
+  and double up to 5 minutes, with jitter so a fleet doesn't reconnect in
+  lockstep. A connection that stays up for a minute resets the backoff.
+- **Re-registration.** After every reconnect the worker registers its
+  functions again, because the server has forgotten it.
+- **Rejected credentials don't cause a retry storm.** An `Unauthenticated` or
+  `PermissionDenied` stream goes straight to the 5-minute cadence, unless the
+  identity token file has rotated since, in which case the new token is tried
+  promptly.
+- **Dead-connection detection.** HTTP/2 keepalive pings every 5 minutes. Don't
+  go below that when dialing a gRPC server directly: servers answer faster
+  pings with GOAWAY `too_many_pings`. Behind a proxy that answers pings itself
+  (e.g. Traefik), 30 seconds is safe.
+- Application-level ping every `pingIntervalSec` (30s; 0 disables).
+- `server.stop()` disconnects and makes `start()` return.
 
 ### Function Tags
 
@@ -607,14 +635,16 @@ const fn = sdk.newSimpleFunction({
 **Authentication Errors**: 
 - Ensure `SERVER_API_TOKEN` is set if the server requires authentication
 - Check token is valid and not expired
+- After a rejection the worker retries every ~5 minutes; restart it after fixing the token to reconnect at once
 
 **TLS Certificate Errors**:
 - Ensure system CA certificates are up to date
-- For self-signed certificates, you may need to disable TLS verification (not recommended for production)
+- For self-signed certificates, set `GRPC_TLS_INSECURE_SKIP_VERIFY=true` (the connection stays encrypted but the server is not verified; never in production)
 
 ### Debug Mode
 
-Enable verbose logging by examining console output. The SDK logs all connection attempts, event messages, and errors.
+Set `DIBBLA_LOG_LEVEL=debug` to log every event sent and received. Payloads are
+never logged: they carry end-user data.
 
 ## License
 

@@ -192,7 +192,7 @@ export function startMessageListener(ctx: HandlerContext): void {
   console.log(`[DEBUG LISTENER] Starting message listener for server: ${serverName}`);
   console.log(`[DEBUG LISTENER] Registered handlers: ${Array.from(ctx.functions.keys()).join(', ')}`);
 
-  communicator.on('message', (message: EventMessage) => {
+  communicator.setMessageHandler((message: EventMessage) => {
     console.log(`[DEBUG LISTENER] ==================== INCOMING MESSAGE ====================`);
     console.log(`[DEBUG LISTENER] Event type: ${message.event}`);
     console.log(`[DEBUG LISTENER] Function: ${message.function}`);

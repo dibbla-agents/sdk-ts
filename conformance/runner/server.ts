@@ -122,7 +122,8 @@ class Queue<T> {
         resolve(v);
       };
       const timer = setTimeout(() => {
-        this.waiters.splice(this.waiters.indexOf(waiter), 1);
+        const i = this.waiters.indexOf(waiter);
+        if (i >= 0) this.waiters.splice(i, 1);
         resolve(undefined);
       }, timeoutMs);
       this.waiters.push(waiter);

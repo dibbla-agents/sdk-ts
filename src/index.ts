@@ -74,7 +74,8 @@ export { functionKey, FUNCTION_PREFIX } from './types/keys';
 export { OAuthProviders } from './internal/oauth/oauth-client';
 
 // Utility exports (for advanced use cases)
-export { shouldUseTLS } from './internal/grpc/communicator';
+export { shouldUseTLS, NotConnectedError } from './internal/grpc/communicator';
+export { setLogLevel, LogLevel } from './internal/log';
 export { uid } from './internal/utils/uid';
 export { generateHash } from './internal/utils/hash';
 export { zodToFlattenedSchema, zodToSchemaString } from './internal/utils/schema';
