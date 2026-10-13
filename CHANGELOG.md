@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **The platform's own gRPC address** (DIB-1430). On the Dibbla platform a
+  worker now connects to the install it is deployed on, with no
+  configuration: when `GRPC_SERVER_ADDRESS` is unset, the SDK uses
+  `DIBBLA_GRPC_SERVER_ADDRESS`, which the platform sets on every deployment,
+  and its TLS hint `DIBBLA_GRPC_USE_TLS`. Before, an unconfigured worker on a
+  self-hosted install dialled `grpc.dibbla.com`. The `grpcServerAddress`
+  option and `GRPC_SERVER_ADDRESS` still win, and the platform's TLS hint
+  never applies to an address you chose. A blank address counts as unset.
+
 ## 0.1.0
 
 **The package is now `@dibbla/sdk-ts`**, published by the `dibbla` npm

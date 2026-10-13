@@ -6,7 +6,12 @@ import { shouldUseTLS } from './internal/grpc/communicator';
 export interface ServerConfig {
   /** Unique identifier for this worker */
   serverName: string;
-  /** Address of the gRPC workflow server */
+  /**
+   * Address of the gRPC workflow server. Precedence: the grpcServerAddress
+   * option, then GRPC_SERVER_ADDRESS, then DIBBLA_GRPC_SERVER_ADDRESS (set by
+   * the Dibbla platform to the install the worker is deployed on, DIB-1430),
+   * then grpc.dibbla.com:443.
+   */
   grpcServerAddress: string;
   /** API token for authentication. When set, it wins over a workload identity token. */
   serverApiToken: string;
@@ -23,7 +28,11 @@ export interface ServerConfig {
    * the token's default organization.
    */
   orgId: string;
-  /** Enable/disable TLS (null = auto-detect based on address) */
+  /**
+   * Enable/disable TLS: the useTLS option, then GRPC_USE_TLS, then the
+   * platform's DIBBLA_GRPC_USE_TLS when the address is the platform's
+   * DIBBLA_GRPC_SERVER_ADDRESS. null = auto-detect based on address.
+   */
   useTLS: boolean | null;
   /**
    * Skip TLS certificate verification. Insecure: the connection stays
@@ -74,11 +83,44 @@ export interface ServerOptions {
   grpcKeepaliveTimeoutSec?: number;
 }
 
+/** Dibbla's hosted platform, used when nothing names a server. */
+const DEFAULT_GRPC_SERVER_ADDRESS = 'grpc.dibbla.com:443';
+
+/**
+ * Set by the Dibbla platform (deploy-api, DIB-1430) on every tenant container:
+ * the gRPC address of the install the worker is deployed on, and whether it
+ * speaks TLS. They are why a worker deployed on a self-hosted install reaches
+ * that install rather than grpc.dibbla.com with no configuration. The
+ * platform reserves the DIBBLA_ prefix, so users cannot set these.
+ */
+const PLATFORM_GRPC_SERVER_ADDRESS_ENV = 'DIBBLA_GRPC_SERVER_ADDRESS';
+const PLATFORM_GRPC_USE_TLS_ENV = 'DIBBLA_GRPC_USE_TLS';
+
 /**
  * Get an environment variable with a default value.
  */
 function getEnvWithDefault(key: string, defaultValue: string): string {
   return process.env[key] || defaultValue;
+}
+
+/** An environment variable with surrounding whitespace removed; blank is unset. */
+function getEnvTrimmed(key: string): string | undefined {
+  const value = process.env[key]?.trim();
+  return value ? value : undefined;
+}
+
+/** true/1 and false/0; anything else is no hint. */
+function parseTLSHint(value: string | undefined): boolean | null {
+  switch (value?.trim()) {
+    case 'true':
+    case '1':
+      return true;
+    case 'false':
+    case '0':
+      return false;
+    default:
+      return null;
+  }
 }
 
 /** An environment variable as an integer, or the default if unset or not an integer. */
@@ -93,9 +135,12 @@ function getEnvBool(key: string): boolean {
 }
 
 /**
- * Create the default configuration from environment variables.
+ * The configuration the environment describes, and the platform's TLS hint:
+ * DIBBLA_GRPC_USE_TLS, non-null only when the address came from
+ * DIBBLA_GRPC_SERVER_ADDRESS, because the hint describes the platform's
+ * address and never one the user chose. config.useTLS is GRPC_USE_TLS alone.
  */
-export function createDefaultConfig(): ServerConfig {
+function readEnvironment(): { config: ServerConfig; platformUseTLS: boolean | null } {
   // TLS configuration with auto-detection
   let useTLS: boolean | null = null;
   const tlsEnv = process.env.GRPC_USE_TLS;
@@ -103,9 +148,15 @@ export function createDefaultConfig(): ServerConfig {
     useTLS = tlsEnv === 'true' || tlsEnv === '1';
   }
 
-  return {
+  // GRPC_SERVER_ADDRESS, else the platform's address, else the hosted default.
+  const userAddress = getEnvTrimmed('GRPC_SERVER_ADDRESS');
+  const platformAddress = userAddress === undefined ? getEnvTrimmed(PLATFORM_GRPC_SERVER_ADDRESS_ENV) : undefined;
+  const platformUseTLS =
+    platformAddress === undefined ? null : parseTLSHint(process.env[PLATFORM_GRPC_USE_TLS_ENV]);
+
+  const config: ServerConfig = {
     serverName: getEnvWithDefault('SERVER_NAME', 'codex-ts-worker'),
-    grpcServerAddress: getEnvWithDefault('GRPC_SERVER_ADDRESS', 'grpc.dibbla.com:443'),
+    grpcServerAddress: userAddress ?? platformAddress ?? DEFAULT_GRPC_SERVER_ADDRESS,
     serverApiToken: getEnvWithDefault('SERVER_API_TOKEN', ''),
     identityTokenFile: getEnvWithDefault('DIBBLA_IDENTITY_TOKEN_FILE', ''),
     orgId: getEnvWithDefault('SERVER_ORG_ID', ''),
@@ -120,13 +171,25 @@ export function createDefaultConfig(): ServerConfig {
     grpcKeepaliveTimeSec: getEnvIntWithDefault('GRPC_KEEPALIVE_TIME_SEC', 0),
     grpcKeepaliveTimeoutSec: getEnvIntWithDefault('GRPC_KEEPALIVE_TIMEOUT_SEC', 0),
   };
+  return { config, platformUseTLS };
+}
+
+/**
+ * Create the default configuration from environment variables.
+ */
+export function createDefaultConfig(): ServerConfig {
+  const { config, platformUseTLS } = readEnvironment();
+  return { ...config, useTLS: config.useTLS ?? platformUseTLS };
 }
 
 /**
  * Merge user options with default configuration.
  */
 export function mergeConfig(options: ServerOptions): ServerConfig {
-  const defaults = createDefaultConfig();
+  const { config: defaults, platformUseTLS } = readEnvironment();
+  // The platform's TLS hint describes the platform's address; an address
+  // passed as an option is the caller's, so the hint does not apply to it.
+  const addressFromOption = options.grpcServerAddress != null;
 
   return {
     serverName: options.serverName ?? defaults.serverName,
@@ -134,7 +197,7 @@ export function mergeConfig(options: ServerOptions): ServerConfig {
     serverApiToken: options.serverApiToken ?? defaults.serverApiToken,
     identityTokenFile: options.identityTokenFile ?? defaults.identityTokenFile,
     orgId: options.orgId ?? defaults.orgId,
-    useTLS: options.useTLS ?? defaults.useTLS,
+    useTLS: options.useTLS ?? defaults.useTLS ?? (addressFromOption ? null : platformUseTLS),
     tlsInsecureSkipVerify: options.tlsInsecureSkipVerify ?? defaults.tlsInsecureSkipVerify,
     handlersConcurrency: options.handlersConcurrency ?? defaults.handlersConcurrency,
     incomingEventsBuffer: options.incomingEventsBuffer ?? defaults.incomingEventsBuffer,

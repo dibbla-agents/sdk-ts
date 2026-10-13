@@ -45,8 +45,9 @@ const GreetingOutput = z.object({
 });
 
 async function main() {
-  // Create server with minimal configuration
-  // (defaults to grpc.dibbla.com:443 with TLS enabled)
+  // Create server with minimal configuration (on the Dibbla platform it
+  // connects to the install it is deployed on; elsewhere it defaults to
+  // grpc.dibbla.com:443 with TLS enabled)
   const server = sdk.create({
     serverName: 'my-custom-worker',
     serverApiToken: process.env.SERVER_API_TOKEN,
@@ -85,15 +86,31 @@ main().catch(console.error);
 | Variable                        | Default               | Description                                                                 |
 | ------------------------------- | --------------------- | --------------------------------------------------------------------------- |
 | `SERVER_NAME`                   | `codex-ts-worker`     | Unique identifier for this worker                                           |
-| `GRPC_SERVER_ADDRESS`           | `grpc.dibbla.com:443` | Address of the workflow server                                              |
+| `GRPC_SERVER_ADDRESS`           | _(the platform's, else `grpc.dibbla.com:443`)_ | Address of the workflow server. Not needed on the Dibbla platform; see [Server Address](#server-address) |
 | `SERVER_API_TOKEN`              | _(empty)_             | API token. When set, it wins over a workload identity token                 |
 | `DIBBLA_IDENTITY_TOKEN_FILE`    | _(set by platform)_   | Workload identity token file; see [Authentication](#authentication)         |
 | `SERVER_ORG_ID`                 | _(empty)_             | Pin registration to one organization (sent as `x-org-id`)                   |
 | `GRPC_USE_TLS`                  | _(auto-detect)_       | Enable/disable TLS (`true`, `false`, or empty)                              |
+| `DIBBLA_GRPC_SERVER_ADDRESS`    | _(set by platform)_   | The gRPC address of the install the worker is deployed on. Set by the Dibbla platform; you don't set this |
+| `DIBBLA_GRPC_USE_TLS`           | _(set by platform)_   | Whether that address uses TLS (`true`/`false`). Set by the Dibbla platform; you don't set this. Applies only to `DIBBLA_GRPC_SERVER_ADDRESS` |
 | `GRPC_TLS_INSECURE_SKIP_VERIFY` | `false`               | Skip server certificate verification (insecure; self-signed servers only)   |
 | `GRPC_KEEPALIVE_TIME_SEC`       | `300`                 | HTTP/2 keepalive ping interval; see [Connection](#robust-connection-management) |
 | `GRPC_KEEPALIVE_TIMEOUT_SEC`    | `20`                  | HTTP/2 keepalive ack timeout                                                |
 | `SDK_LOG_LEVEL`              | `info`                | SDK log level: `debug`, `info`, `warn`, `error` or `silent`                 |
+
+### Server Address
+
+- **On the Dibbla platform, no configuration is needed.** The platform sets
+  `DIBBLA_GRPC_SERVER_ADDRESS` (and `DIBBLA_GRPC_USE_TLS`) to the workflow
+  server of the install the worker is deployed on, so a worker on a
+  self-hosted install connects to that install, not to `grpc.dibbla.com`.
+  Leave `GRPC_SERVER_ADDRESS` unset there: it wins over the platform's
+  address, so setting it points the worker somewhere else.
+- **Set `GRPC_SERVER_ADDRESS` only to reach a different server on purpose**,
+  for example `localhost:50051` in local development.
+- The first of these that is set wins (blank counts as unset): the
+  `grpcServerAddress` option, `GRPC_SERVER_ADDRESS`,
+  `DIBBLA_GRPC_SERVER_ADDRESS`, then `grpc.dibbla.com:443`.
 
 ### Authentication
 
@@ -112,6 +129,12 @@ The SDK defaults to `grpc.dibbla.com:443` with TLS enabled. It automatically det
 
 - **Production addresses** (default: `grpc.dibbla.com:443`): TLS enabled with system certificates
 - **Localhost addresses** (`localhost:`, `127.0.0.1:`, `[::1]:`): No TLS (for local development)
+
+The first of these decides: the `useTLS` option, `GRPC_USE_TLS`,
+`DIBBLA_GRPC_USE_TLS` (set by the platform), then auto-detection.
+`DIBBLA_GRPC_USE_TLS` applies only while the address is the platform's
+`DIBBLA_GRPC_SERVER_ADDRESS`: it describes that address, so it never applies
+to one you chose with `GRPC_SERVER_ADDRESS` or `grpcServerAddress`.
 
 #### Explicit TLS Control
 
@@ -778,6 +801,7 @@ const fn = sdk.newSimpleFunction({
 
 **Connection Failures**: 
 - By default, the SDK connects to `grpc.dibbla.com:443` with TLS enabled
+- Deployed on the Dibbla platform, it connects to the install it is deployed on (`DIBBLA_GRPC_SERVER_ADDRESS`), unless the deployment sets `GRPC_SERVER_ADDRESS`, which wins
 - For local development, set `GRPC_SERVER_ADDRESS=localhost:50051`
 - Verify your server address points to a running workflow server
 - Check TLS configuration matches your server setup
